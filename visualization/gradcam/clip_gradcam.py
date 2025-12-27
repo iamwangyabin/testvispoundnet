@@ -51,10 +51,32 @@ class CLIPGradCAM:
         
         self.device = device
         
-        # Load CLIP model
+        # Load CLIP model with default design details for vanilla CLIP
         print(f"Loading CLIP model: {model_name}")
-        self.model, self.preprocess = clip.load(model_name, device=device)
-        self.model.eval()
+        
+        # Create default design details for vanilla CLIP (no prompting)
+        design_details = {
+            'trainer': 'CoOp',  # Use basic transformer blocks
+            'vision_depth': 0,   # No visual prompting
+            'language_depth': 0, # No text prompting
+            'vision_ctx': 0,     # No visual context
+            'language_ctx': 0    # No language context
+        }
+        
+        # Monkey patch the build_model function to include design_details
+        original_build_model = clip.model.build_model
+        def patched_build_model(state_dict):
+            return original_build_model(state_dict, design_details)
+        
+        # Temporarily replace build_model
+        clip.model.build_model = patched_build_model
+        
+        try:
+            self.model, self.preprocess = clip.load(model_name, device=device)
+            self.model.eval()
+        finally:
+            # Restore original build_model
+            clip.model.build_model = original_build_model
         
         # Get model specifications
         self.model_name = model_name
@@ -321,6 +343,27 @@ class CLIPGradCAM:
             'device': self.device,
             'num_patches': (self.input_size // self.patch_size) ** 2
         }
+    
+    def preprocess_image(self, image_path: str) -> torch.Tensor:
+        """
+        Preprocess image for CLIP model.
+        
+        Args:
+            image_path: Path to image file
+            
+        Returns:
+            Preprocessed image tensor
+        """
+        from PIL import Image
+        
+        image = Image.open(image_path).convert('RGB')
+        image_tensor = self.preprocess(image).unsqueeze(0)
+        return image_tensor
+    
+    def __del__(self):
+        """Cleanup when object is destroyed."""
+        if hasattr(self, 'vit_gradcam'):
+            del self.vit_gradcam        }
     
     def preprocess_image(self, image_path: str) -> torch.Tensor:
         """
