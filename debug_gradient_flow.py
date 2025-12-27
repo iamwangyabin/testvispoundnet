@@ -155,7 +155,7 @@ def main():
     
     # Create model
     print("Creating PoundNet model...")
-    model = get_network(cfg)
+    model = get_model(cfg)
     
     # Load checkpoint
     checkpoint_path = './weights/poundnet_ViTL_Progan_20240506_23_30_25.ckpt'
