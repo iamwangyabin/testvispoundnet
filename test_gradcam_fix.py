@@ -15,8 +15,9 @@ sys.path.append('.')
 
 from networks.poundnet_detector import PoundNet
 from visualization.gradcam.poundnet_gradcam import PoundNetGradCAM
-from utils.network_factory import create_model
+from utils.network_factory import get_model
 from utils.resume_tools import resume_checkpoint
+from utils.util import load_config
 
 def create_test_image():
     """Create a test image tensor."""
@@ -48,8 +49,11 @@ def test_gradcam_fix():
     # Load model
     print("Loading PoundNet model...")
     try:
+        # Load config
+        config = load_config('cfgs/poundnet.yaml')
+        
         # Create model
-        model = create_model('poundnet', 'cfgs/poundnet.yaml')
+        model = get_model(config)
         
         # Load checkpoint
         checkpoint_path = './weights/poundnet_ViTL_Progan_20240506_23_30_25.ckpt'
@@ -64,6 +68,8 @@ def test_gradcam_fix():
         
     except Exception as e:
         print(f"Error loading model: {e}")
+        import traceback
+        traceback.print_exc()
         return False
     
     # Create GradCAM
