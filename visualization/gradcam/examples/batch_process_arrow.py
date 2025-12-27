@@ -27,6 +27,7 @@ from visualization.gradcam import PoundNetGradCAM
 from utils.util import load_config_with_cli
 from utils.network_factory import get_model
 from utils.resume_tools import resume_lightning
+import utils  # Add this import for eval() to find utils module
 import hydra
 import data
 
