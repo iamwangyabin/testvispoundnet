@@ -16,7 +16,7 @@ sys.path.append('.')
 from networks.poundnet_detector import PoundNet
 from visualization.gradcam.poundnet_gradcam import PoundNetGradCAM
 from utils.network_factory import get_model
-from utils.resume_tools import resume_checkpoint
+from utils.resume_tools import resume_lightning
 from utils.util import load_config
 
 def create_test_image():
@@ -59,7 +59,7 @@ def test_gradcam_fix():
         checkpoint_path = './weights/poundnet_ViTL_Progan_20240506_23_30_25.ckpt'
         if os.path.exists(checkpoint_path):
             print(f"Loading checkpoint: {checkpoint_path}")
-            resume_checkpoint(model, checkpoint_path)
+            resume_lightning(model, checkpoint_path)
         else:
             print("Warning: Checkpoint not found, using random weights")
         
