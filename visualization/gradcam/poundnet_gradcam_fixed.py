@@ -73,9 +73,16 @@ class PoundNetGradCAM(ViTGradCAM):
             self.original_requires_grad[name] = param.requires_grad
         
         # Enable gradients for image encoder (visual transformer)
-        # This must be done AFTER model initialization to override PoundNet's gradient control
+        # This is CRITICAL: PoundNet disables gradients for image_encoder by design,
+        # but we need them for GradCAM computation
         for name, param in self.model.named_parameters():
             if 'image_encoder' in name:
+                param.requires_grad_(True)
+                print(f"[GradCAM] Enabled gradients for: {name}")
+        
+        # Also ensure the image encoder module itself allows gradients
+        if hasattr(self.model, 'image_encoder'):
+            for param in self.model.image_encoder.parameters():
                 param.requires_grad_(True)
     
     def _restore_gradients(self):
@@ -188,6 +195,10 @@ class PoundNetGradCAM(ViTGradCAM):
         to weight attention patterns, making the visualization class-specific.
         """
         
+        # CRITICAL: Re-enable gradients before each computation
+        # PoundNet disables image_encoder gradients, so we must re-enable them
+        self._enable_gradients_for_gradcam()
+        
         # Clear previous gradients and activations
         self.gradients.clear()
         self.activations.clear()
@@ -209,15 +220,32 @@ class PoundNetGradCAM(ViTGradCAM):
         self.model.zero_grad()
         class_score = logits[0, target_class_idx]
         
+        print(f"[GradCAM] Class score: {class_score.item():.4f}, requires_grad: {class_score.requires_grad}")
+        
         if not class_score.requires_grad:
-            # Fallback to activation-based method if gradients not available
-            return self._generate_activation_cam(input_tensor, target_class_idx)
+            print("[GradCAM] WARNING: Class score does not require gradients!")
+            # Force enable gradients one more time
+            self._enable_gradients_for_gradcam()
+            # Try forward pass again
+            output = self.model(input_tensor)
+            if isinstance(output, dict):
+                logits = output['logits']
+            else:
+                logits = output
+            class_score = logits[0, target_class_idx]
+            
+            if not class_score.requires_grad:
+                print("[GradCAM] Still no gradients, falling back to activation-based method")
+                return self._generate_activation_cam(input_tensor, target_class_idx)
         
         # Backward pass to compute gradients
         class_score.backward(retain_graph=True)
         
+        print(f"[GradCAM] Captured {len(self.gradients)} gradient tensors and {len(self.activations)} activation tensors")
+        
         # Use the last target layer for gradient-weighted attention
         if not self.activations:
+            print("[GradCAM] No activations captured, falling back to activation-based method")
             return self._generate_activation_cam(input_tensor, target_class_idx)
         
         layer_name = list(self.activations.keys())[-1]
@@ -226,8 +254,11 @@ class PoundNetGradCAM(ViTGradCAM):
         # Get corresponding gradients
         if layer_name in self.gradients:
             gradients = self.gradients[layer_name]
+            print(f"[GradCAM] Using layer: {layer_name}")
+            print(f"[GradCAM] Gradients shape: {gradients.shape}, max: {gradients.abs().max().item():.6f}")
+            print(f"[GradCAM] Activations shape: {activations.shape}, max: {activations.abs().max().item():.6f}")
         else:
-            # If no gradients available, use activation magnitudes
+            print(f"[GradCAM] No gradients for layer {layer_name}, falling back to activation-based method")
             return self._generate_activation_cam(input_tensor, target_class_idx)
         
         # Handle different tensor formats
@@ -247,6 +278,9 @@ class PoundNetGradCAM(ViTGradCAM):
         
         patch_activations = activations[0, patch_start_idx:patch_end_idx, :]  # (num_patches, dim)
         patch_gradients = gradients[0, patch_start_idx:patch_end_idx, :]  # (num_patches, dim)
+        
+        print(f"[GradCAM] Patch gradients shape: {patch_gradients.shape}, max: {patch_gradients.abs().max().item():.6f}")
+        print(f"[GradCAM] Patch activations shape: {patch_activations.shape}, max: {patch_activations.abs().max().item():.6f}")
         
         # Compute class-specific importance weights using gradients
         # Method 1: Global average pooling of gradients (standard GradCAM)
@@ -268,10 +302,16 @@ class PoundNetGradCAM(ViTGradCAM):
             'elementwise': cam_elementwise
         }
         
+        # Print debug info for each method
+        for method_name, cam_tensor in cam_methods.items():
+            print(f"[GradCAM] {method_name}: max={cam_tensor.max().item():.6f}, min={cam_tensor.min().item():.6f}, mean={cam_tensor.mean().item():.6f}")
+        
         # Select method with highest dynamic range (better class differentiation)
         best_method = max(cam_methods.keys(),
                          key=lambda k: (cam_methods[k].max() - cam_methods[k].min()).item())
         cam = cam_methods[best_method]
+        
+        print(f"[GradCAM] Selected method: {best_method}")
         
         # Ensure we have exactly 256 patches
         if len(cam) < 256:
@@ -290,6 +330,8 @@ class PoundNetGradCAM(ViTGradCAM):
         
         # Convert to numpy
         attention_map = attention_map.detach().cpu().numpy()
+        
+        print(f"[GradCAM] Final attention map: max={attention_map.max():.6f}, min={attention_map.min():.6f}, mean={attention_map.mean():.6f}")
         
         return attention_map
     
