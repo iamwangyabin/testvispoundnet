@@ -19,7 +19,8 @@ from typing import Dict, Any
 # Add parent directories to path
 sys.path.append(str(Path(__file__).parent.parent.parent.parent))
 
-from visualization.gradcam import PoundNetGradCAM, visualize_gradcam, visualize_comparative_gradcam
+from visualization.gradcam.poundnet_gradcam_fixed import PoundNetGradCAM
+from visualization.gradcam import visualize_gradcam, visualize_comparative_gradcam
 from visualization.gradcam import visualize_multi_layer_analysis, save_gradcam_results
 from visualization.gradcam.utils import preprocess_image_for_gradcam, create_attention_summary_plot
 from utils.util import load_config_with_cli
