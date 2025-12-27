@@ -204,7 +204,10 @@ def _analyze_arrow_subset_with_clip_gradcam(
             
             # Save metadata
             metadata_copy = metadata.copy()
+            # Convert all numpy types to Python types for JSON serialization
             metadata_copy['similarities'] = [float(s) for s in metadata_copy['similarities']]
+            metadata_copy['best_match_idx'] = int(metadata_copy['best_match_idx'])
+            metadata_copy['best_similarity'] = float(metadata_copy['best_similarity'])
             with open(os.path.join(image_output_dir, f"image_{idx:06d}_clip_metadata.json"), 'w') as f:
                 json.dump(metadata_copy, f, indent=2)
             
@@ -251,7 +254,7 @@ def _analyze_arrow_subset_with_clip_gradcam(
             # Add to results summary
             result_summary = {
                 'image_index': int(idx),
-                'true_label': int(label.item()),
+                'true_label': int(label.item()) if hasattr(label, 'item') else int(label),
                 'subset_name': subset_name,
                 'best_match': best_match,
                 'best_similarity': float(best_similarity),
@@ -332,7 +335,10 @@ def analyze_single_image_with_clip_gradcam(
     
     # Save metadata
     metadata_copy = metadata.copy()
+    # Convert all numpy types to Python types for JSON serialization
     metadata_copy['similarities'] = [float(s) for s in metadata_copy['similarities']]
+    metadata_copy['best_match_idx'] = int(metadata_copy['best_match_idx'])
+    metadata_copy['best_similarity'] = float(metadata_copy['best_similarity'])
     with open(os.path.join(output_dir, f"{base_name}_clip_metadata.json"), 'w') as f:
         json.dump(metadata_copy, f, indent=2)
     

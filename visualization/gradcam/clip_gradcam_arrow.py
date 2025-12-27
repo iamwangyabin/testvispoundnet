@@ -276,10 +276,10 @@ class CLIPGradCAMArrow:
         
         results['metadata'] = {
             'text_prompts': text_prompts,
-            'similarities': similarities,
-            'best_match_idx': best_idx,
+            'similarities': [float(s) for s in similarities],  # Convert numpy floats to Python floats
+            'best_match_idx': int(best_idx),  # Convert numpy int64 to Python int
             'best_match_prompt': best_prompt,
-            'best_similarity': similarities[best_idx]
+            'best_similarity': float(similarities[best_idx])  # Convert numpy float to Python float
         }
         
         return results
