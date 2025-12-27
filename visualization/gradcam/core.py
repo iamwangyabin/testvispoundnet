@@ -88,12 +88,21 @@ class ViTGradCAM:
         """Register forward and backward hooks on target layers."""
         def forward_hook(name):
             def hook(module, input, output):
-                self.activations[name] = output.detach()
+                print(f"[DEBUG] Forward hook triggered for {name}, output shape: {output.shape}")
+                # Store activation WITHOUT detaching to preserve gradients
+                self.activations[name] = output
             return hook
         
         def backward_hook(name):
             def hook(module, grad_input, grad_output):
-                self.gradients[name] = grad_output[0].detach()
+                print(f"[DEBUG] Backward hook triggered for {name}")
+                if grad_output[0] is not None:
+                    print(f"[DEBUG] Grad output shape: {grad_output[0].shape}")
+                    print(f"[DEBUG] Grad output stats - min: {grad_output[0].min():.6f}, max: {grad_output[0].max():.6f}, mean: {grad_output[0].mean():.6f}")
+                    # Store gradients WITHOUT detaching to preserve computation graph
+                    self.gradients[name] = grad_output[0]
+                else:
+                    print(f"[DEBUG] Grad output is None for {name}")
             return hook
         
         for layer_name in self.target_layers:
@@ -102,9 +111,10 @@ class ViTGradCAM:
             for attr in layer_name.split('.'):
                 layer = getattr(layer, attr)
             
-            # Register hooks
+            print(f"[DEBUG] Registering hooks for layer: {layer_name}")
+            # Register hooks - use full_backward_hook for better gradient capture
             forward_handle = layer.register_forward_hook(forward_hook(layer_name))
-            backward_handle = layer.register_backward_hook(backward_hook(layer_name))
+            backward_handle = layer.register_full_backward_hook(backward_hook(layer_name))
             
             self.hooks.extend([forward_handle, backward_handle])
     
@@ -187,6 +197,11 @@ class ViTGradCAM:
         gradients = self.gradients[layer_name]  # Shape: (seq_len, batch, dim)
         activations = self.activations[layer_name]  # Shape: (seq_len, batch, dim)
         
+        print(f"[DEBUG] Core gradients shape: {gradients.shape}")
+        print(f"[DEBUG] Core activations shape: {activations.shape}")
+        print(f"[DEBUG] Core gradients stats - min: {gradients.min():.6f}, max: {gradients.max():.6f}, mean: {gradients.mean():.6f}")
+        print(f"[DEBUG] Core activations stats - min: {activations.min():.6f}, max: {activations.max():.6f}, mean: {activations.mean():.6f}")
+        
         # Convert to (batch, seq_len, dim) format
         if gradients.dim() == 3 and gradients.shape[1] == 1:
             gradients = gradients.permute(1, 0, 2)  # (batch, seq_len, dim)
@@ -200,11 +215,16 @@ class ViTGradCAM:
         patch_gradients = gradients[0, patch_start_idx:patch_end_idx, :]  # (num_patches, dim)
         patch_activations = activations[0, patch_start_idx:patch_end_idx, :]  # (num_patches, dim)
         
+        print(f"[DEBUG] Core patch gradients shape: {patch_gradients.shape}")
+        print(f"[DEBUG] Core patch activations shape: {patch_activations.shape}")
+        
         # Compute importance weights (global average pooling of gradients)
         weights = torch.mean(patch_gradients, dim=0, keepdim=True)  # (1, dim)
         
         # Generate CAM by weighted combination
         cam = torch.sum(weights * patch_activations, dim=1)  # (num_patches,)
+        
+        print(f"[DEBUG] Core CAM stats - min: {cam.min():.6f}, max: {cam.max():.6f}, mean: {cam.mean():.6f}")
         
         # Reshape to spatial grid
         cam = cam.view(self.patch_grid_size, self.patch_grid_size)  # (14, 14)

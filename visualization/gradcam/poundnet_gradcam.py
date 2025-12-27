@@ -73,10 +73,18 @@ class PoundNetGradCAM(ViTGradCAM):
             self.original_requires_grad[name] = param.requires_grad
         
         # Enable gradients for image encoder (visual transformer)
+        # This must be done AFTER model initialization to override PoundNet's gradient control
         for name, param in self.model.named_parameters():
             if 'image_encoder' in name:
                 param.requires_grad_(True)
                 print(f"[DEBUG] Enabled gradients for: {name}")
+        
+        # Verify gradients are actually enabled
+        enabled_count = 0
+        for name, param in self.model.named_parameters():
+            if 'image_encoder' in name and param.requires_grad:
+                enabled_count += 1
+        print(f"[DEBUG] Successfully enabled gradients for {enabled_count} image encoder parameters")
     
     def _restore_gradients(self):
         """Restore original gradient states."""
@@ -185,6 +193,12 @@ class PoundNetGradCAM(ViTGradCAM):
         
         print(f"[DEBUG] PoundNet target class: {target_class_idx}")
         
+        # Re-enable gradients before backward pass (PoundNet may have disabled them)
+        print("[DEBUG] Re-enabling gradients before backward pass...")
+        for name, param in self.model.named_parameters():
+            if 'image_encoder' in name:
+                param.requires_grad_(True)
+        
         # Backward pass
         self.model.zero_grad()
         class_score = logits[0, target_class_idx]
@@ -192,6 +206,11 @@ class PoundNetGradCAM(ViTGradCAM):
         
         if not class_score.requires_grad:
             raise RuntimeError("Class score does not require gradients. Check model parameter gradients.")
+        
+        # Verify image encoder parameters still have gradients enabled
+        enabled_params = sum(1 for name, param in self.model.named_parameters()
+                           if 'image_encoder' in name and param.requires_grad)
+        print(f"[DEBUG] Image encoder parameters with gradients before backward: {enabled_params}")
         
         class_score.backward(retain_graph=True)
         
