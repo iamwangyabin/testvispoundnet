@@ -118,10 +118,10 @@ class PoundNetGradCAM(ViTGradCAM):
         return_logits: bool = False
     ) -> Union[np.ndarray, Tuple[np.ndarray, torch.Tensor]]:
         """
-        Generate Class Activation Map for PoundNet input using attention-based visualization.
+        Generate Class Activation Map for PoundNet input using gradient-based visualization.
         
-        Since CLIP ViT only uses class token for classification, we use attention weights
-        to understand which patches the model focuses on.
+        This method computes class-specific gradients to generate different CAMs
+        for real and fake classes, ensuring proper class differentiation.
         
         Args:
             input_tensor: Input tensor of shape (1, 3, H, W)
@@ -135,8 +135,15 @@ class PoundNetGradCAM(ViTGradCAM):
         """
         self.model.eval()
         
-        # Forward pass to get logits
+        # Clear previous gradients and activations for fresh computation
+        self.gradients.clear()
+        self.activations.clear()
+        
+        # Ensure input tensor requires gradients and is on correct device
         input_tensor = input_tensor.to(self.device)
+        input_tensor.requires_grad_(True)
+        
+        # Forward pass to get logits
         output = self.model(input_tensor)
         
         # Extract logits from PoundNet output
@@ -144,7 +151,6 @@ class PoundNetGradCAM(ViTGradCAM):
             logits = output['logits']
         else:
             logits = output
-        
         
         # Handle target class specification
         if target_class is None:
@@ -159,7 +165,7 @@ class PoundNetGradCAM(ViTGradCAM):
         else:
             target_class_idx = target_class
         
-        # Generate attention-based CAM
+        # Generate class-specific gradient-based CAM
         cam = self._generate_attention_cam(input_tensor, target_class_idx)
         
         # Enhanced normalization and contrast improvement
@@ -353,6 +359,9 @@ class PoundNetGradCAM(ViTGradCAM):
         """
         Generate CAMs for both Real and Fake classes for comparison.
         
+        This method ensures proper class-specific gradient computation by
+        performing separate backward passes for each class.
+        
         Args:
             input_tensor: Input tensor of shape (1, 3, H, W)
             layer_name: Specific layer to use
@@ -361,16 +370,26 @@ class PoundNetGradCAM(ViTGradCAM):
         Returns:
             Dictionary with 'real' and 'fake' CAMs
         """
+        # Clear any previous gradients
+        self.model.zero_grad()
+        
+        # Generate Real class CAM with fresh computation
         real_cam = self.generate_cam(
-            input_tensor, 
-            target_class='real', 
+            input_tensor.clone(),
+            target_class='real',
             layer_name=layer_name,
             normalize=normalize
         )
         
+        # Clear gradients between computations to ensure independence
+        self.model.zero_grad()
+        self.gradients.clear()
+        self.activations.clear()
+        
+        # Generate Fake class CAM with fresh computation
         fake_cam = self.generate_cam(
-            input_tensor, 
-            target_class='fake', 
+            input_tensor.clone(),
+            target_class='fake',
             layer_name=layer_name,
             normalize=normalize
         )
