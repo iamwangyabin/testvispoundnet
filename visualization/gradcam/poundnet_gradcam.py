@@ -208,8 +208,9 @@ class PoundNetGradCAM(ViTGradCAM):
         # Apply ReLU to focus on positive contributions
         cam = F.relu(cam)
         
-        # Convert to numpy
-        cam = cam.cpu().numpy()
+        # Convert to numpy with proper detachment
+        print(f"[DEBUG] CAM tensor requires_grad: {cam.requires_grad}")
+        cam = cam.detach().cpu().numpy()
         
         # Normalize if requested
         if normalize:
@@ -298,8 +299,8 @@ class PoundNetGradCAM(ViTGradCAM):
         
         return {
             'cam': cam,
-            'logits': logits.cpu().numpy(),
-            'probabilities': probabilities.cpu().numpy(),
+            'logits': logits.detach().cpu().numpy(),
+            'probabilities': probabilities.detach().cpu().numpy(),
             'predicted_class_idx': predicted_class_idx,
             'predicted_class_name': predicted_class_name,
             'confidence': confidence,

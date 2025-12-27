@@ -198,8 +198,9 @@ class ViTGradCAM:
         # Apply ReLU to focus on positive contributions
         cam = F.relu(cam)
         
-        # Convert to numpy
-        cam = cam.cpu().numpy()
+        # Convert to numpy with proper detachment
+        print(f"[DEBUG] Core CAM tensor requires_grad: {cam.requires_grad}")
+        cam = cam.detach().cpu().numpy()
         
         # Normalize if requested
         if normalize:
@@ -375,8 +376,9 @@ class GradCAMPlusPlus(ViTGradCAM):
         # Apply ReLU
         cam = F.relu(cam)
         
-        # Convert to numpy
-        cam = cam.cpu().numpy()
+        # Convert to numpy with proper detachment
+        print(f"[DEBUG] GradCAM++ CAM tensor requires_grad: {cam.requires_grad}")
+        cam = cam.detach().cpu().numpy()
         
         # Normalize if requested
         if normalize:
