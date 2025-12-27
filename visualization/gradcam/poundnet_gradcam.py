@@ -274,17 +274,67 @@ class PoundNetGradCAM(ViTGradCAM):
                 patch_start_idx = 1
                 print(f"[DEBUG] Using all available tokens from {patch_start_idx} to {patch_end_idx}")
         
-        # Debug token ranges
+        # Debug token ranges and analyze gradient distribution
         print(f"[DEBUG] Extracting tokens from {patch_start_idx} to {patch_end_idx} (total: {patch_end_idx - patch_start_idx})")
         
-        # Extract patch tokens
-        patch_gradients = gradients[0, patch_start_idx:patch_end_idx, :]
-        patch_activations = activations[0, patch_start_idx:patch_end_idx, :]
+        # Analyze gradient distribution across all tokens
+        all_gradients = gradients[0]  # Shape: (273, 1024)
+        token_grad_norms = torch.norm(all_gradients, dim=1)  # Shape: (273,)
         
-        print(f"[DEBUG] Extracted patch gradients shape: {patch_gradients.shape}")
-        print(f"[DEBUG] Extracted patch activations shape: {patch_activations.shape}")
-        print(f"[DEBUG] Extracted patch gradients stats - min: {patch_gradients.min():.6f}, max: {patch_gradients.max():.6f}, mean: {patch_gradients.mean():.6f}")
-        print(f"[DEBUG] Extracted patch activations stats - min: {patch_activations.min():.6f}, max: {patch_activations.max():.6f}, mean: {patch_activations.mean():.6f}")
+        print(f"[DEBUG] Token gradient norms - shape: {token_grad_norms.shape}")
+        print(f"[DEBUG] Token gradient norms - min: {token_grad_norms.min():.6f}, max: {token_grad_norms.max():.6f}, mean: {token_grad_norms.mean():.6f}")
+        
+        # Find tokens with non-zero gradients
+        nonzero_tokens = torch.nonzero(token_grad_norms > 1e-6).squeeze()
+        print(f"[DEBUG] Tokens with non-zero gradients: {nonzero_tokens.tolist() if nonzero_tokens.numel() > 0 else 'None'}")
+        
+        # Check specific token ranges
+        class_token_grad = token_grad_norms[0]
+        patch_token_grads = token_grad_norms[1:257] if seq_len > 257 else token_grad_norms[1:]
+        remaining_token_grads = token_grad_norms[257:] if seq_len > 257 else torch.tensor([])
+        
+        print(f"[DEBUG] Class token gradient norm: {class_token_grad:.6f}")
+        print(f"[DEBUG] Patch tokens gradient norms - min: {patch_token_grads.min():.6f}, max: {patch_token_grads.max():.6f}, mean: {patch_token_grads.mean():.6f}")
+        if remaining_token_grads.numel() > 0:
+            print(f"[DEBUG] Remaining tokens gradient norms - min: {remaining_token_grads.min():.6f}, max: {remaining_token_grads.max():.6f}, mean: {remaining_token_grads.mean():.6f}")
+        
+        # Try different extraction strategies
+        if patch_token_grads.max() <= 1e-6:
+            print("[DEBUG] Patch tokens have zero gradients, trying alternative extraction...")
+            
+            # Strategy 1: Use all tokens except class token
+            if remaining_token_grads.numel() > 0 and remaining_token_grads.max() > 1e-6:
+                print("[DEBUG] Using remaining tokens (likely prompt tokens) for gradient computation")
+                # Use the last 256 tokens or all remaining tokens
+                start_idx = max(1, seq_len - 256)
+                end_idx = seq_len
+                patch_gradients = gradients[0, start_idx:end_idx, :]
+                patch_activations = activations[0, start_idx:end_idx, :]
+                
+                # Pad or truncate to 256 tokens
+                if patch_gradients.shape[0] < 256:
+                    padding = 256 - patch_gradients.shape[0]
+                    patch_gradients = F.pad(patch_gradients, (0, 0, 0, padding))
+                    patch_activations = F.pad(patch_activations, (0, 0, 0, padding))
+                elif patch_gradients.shape[0] > 256:
+                    patch_gradients = patch_gradients[:256]
+                    patch_activations = patch_activations[:256]
+            else:
+                print("[DEBUG] No tokens have significant gradients, using class token repeated")
+                # Fallback: use class token gradients repeated
+                class_grad = gradients[0, 0:1, :].repeat(256, 1)
+                class_act = activations[0, 0:1, :].repeat(256, 1)
+                patch_gradients = class_grad
+                patch_activations = class_act
+        else:
+            # Standard extraction
+            patch_gradients = gradients[0, patch_start_idx:patch_end_idx, :]
+            patch_activations = activations[0, patch_start_idx:patch_end_idx, :]
+        
+        print(f"[DEBUG] Final extracted patch gradients shape: {patch_gradients.shape}")
+        print(f"[DEBUG] Final extracted patch activations shape: {patch_activations.shape}")
+        print(f"[DEBUG] Final extracted patch gradients stats - min: {patch_gradients.min():.6f}, max: {patch_gradients.max():.6f}, mean: {patch_gradients.mean():.6f}")
+        print(f"[DEBUG] Final extracted patch activations stats - min: {patch_activations.min():.6f}, max: {patch_activations.max():.6f}, mean: {patch_activations.mean():.6f}")
         
         # Adjust for actual number of patch tokens
         actual_patch_tokens = patch_gradients.shape[0]
