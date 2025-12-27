@@ -320,12 +320,21 @@ class PoundNetGradCAM(ViTGradCAM):
                     patch_gradients = patch_gradients[:256]
                     patch_activations = patch_activations[:256]
             else:
-                print("[DEBUG] No tokens have significant gradients, using class token repeated")
-                # Fallback: use class token gradients repeated
-                class_grad = gradients[0, 0:1, :].repeat(256, 1)
-                class_act = activations[0, 0:1, :].repeat(256, 1)
+                print("[DEBUG] No tokens have significant gradients, using class token with patch activations")
+                # Better fallback: use class token gradients with actual patch activations
+                # This preserves spatial information from patch activations while using class gradients
+                class_grad = gradients[0, 0:1, :].repeat(256, 1)  # Repeat class gradients
+                patch_act = activations[0, patch_start_idx:patch_end_idx, :]  # Use actual patch activations
+                
+                # Ensure we have 256 patch activations
+                if patch_act.shape[0] < 256:
+                    padding = 256 - patch_act.shape[0]
+                    patch_act = F.pad(patch_act, (0, 0, 0, padding))
+                elif patch_act.shape[0] > 256:
+                    patch_act = patch_act[:256]
+                
                 patch_gradients = class_grad
-                patch_activations = class_act
+                patch_activations = patch_act
         else:
             # Standard extraction
             patch_gradients = gradients[0, patch_start_idx:patch_end_idx, :]
