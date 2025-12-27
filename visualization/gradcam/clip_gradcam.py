@@ -54,29 +54,9 @@ class CLIPGradCAM:
         # Load CLIP model with default design details for vanilla CLIP
         print(f"Loading CLIP model: {model_name}")
         
-        # Create default design details for vanilla CLIP (no prompting)
-        design_details = {
-            'trainer': 'CoOp',  # Use basic transformer blocks
-            'vision_depth': 0,   # No visual prompting
-            'language_depth': 0, # No text prompting
-            'vision_ctx': 0,     # No visual context
-            'language_ctx': 0    # No language context
-        }
-        
-        # Monkey patch the build_model function to include design_details
-        original_build_model = clip.model.build_model
-        def patched_build_model(state_dict):
-            return original_build_model(state_dict, design_details)
-        
-        # Temporarily replace build_model
-        clip.model.build_model = patched_build_model
-        
-        try:
-            self.model, self.preprocess = clip.load(model_name, device=device)
-            self.model.eval()
-        finally:
-            # Restore original build_model
-            clip.model.build_model = original_build_model
+        # Load CLIP model (the clip.load function now handles design_details internally)
+        self.model, self.preprocess = clip.load(model_name, device=device)
+        self.model.eval()
         
         # Get model specifications
         self.model_name = model_name

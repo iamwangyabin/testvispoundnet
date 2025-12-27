@@ -85,7 +85,7 @@ def available_models() -> List[str]:
     return list(_MODELS.keys())
 
 
-def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu", jit=False):
+def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu", jit=False, design_details=None):
     """Load a CLIP model
 
     Parameters
@@ -126,7 +126,16 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
         state_dict = torch.load(model_path, map_location="cpu")
 
     if not jit:
-        model = build_model(state_dict or model.state_dict()).to(device)
+        # Provide default design_details for vanilla CLIP if not specified
+        if design_details is None:
+            design_details = {
+                'trainer': 'CoOp',  # Use basic transformer blocks
+                'vision_depth': 0,   # No visual prompting
+                'language_depth': 0, # No text prompting
+                'vision_ctx': 0,     # No visual context
+                'language_ctx': 0    # No language context
+            }
+        model = build_model(state_dict or model.state_dict(), design_details).to(device)
         if str(device) == "cpu":
             model.float()
         return model, _transform(model.visual.input_resolution)
