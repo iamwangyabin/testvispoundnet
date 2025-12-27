@@ -23,28 +23,6 @@ datasets:
 
   base_path: "/home/data/yabin/DF-arrow"
   source:
-
-    - { target: data.ArrowDatasets,
-        data_root: '${datasets.base_path}/DiffusionForensics',
-        sub_sets: [ 'lsun_bedroom_adm', 'lsun_bedroom_iddpm', 'lsun_bedroom_ddpm', 'lsun_bedroom_pndm',
-                  'lsun_bedroom_sdv2', 'lsun_bedroom_ldm', 'lsun_bedroom_vqdiffusion', 'lsun_bedroom_if',
-                  'lsun_bedroom_dalle2', 'lsun_bedroom_midjourney' ],
-        split: 'test',
-        benchmark_name: 'DiffusionForensics' }
-
-    - { target: data.ArrowDatasets,
-        data_root: '${datasets.base_path}/Ojha',
-        sub_sets: [ "dalle", "glide_100_10", "glide_100_27", "glide_50_27", "guided", "ldm_100", "ldm_200", "ldm_200_cfg" ],
-        split: 'test',
-        benchmark_name: 'Ojha' }
-
-    - { target: data.ArrowDatasets,
-        data_root: '${datasets.base_path}/ForenSynths',
-        sub_sets: [ "biggan", "crn", "cyclegan", "deepfake", "gaugan", "imle", "progan", "san", "seeingdark", "stargan",
-                  "stylegan", "stylegan2", "whichfaceisreal"  ],
-        split: 'test',
-        benchmark_name: 'ForenSynths'}
-
     - { target: data.ArrowDatasets,
         data_root: '${datasets.base_path}/DIF',
         sub_sets: ['biggan',  'cyclegan',  'dalle_2',  'dalle_mini',  'gaugan',  'glide',  'mj',  'progan',  'sd14',  'sd21',
@@ -57,9 +35,6 @@ datasets:
   loader_workers: 32
 
   trsf:
-    - _target_: data.Compress
-      method: "JPEG"
-      qf: 90
     - _target_: torchvision.transforms.Resize
       size: 256
     - _target_: torchvision.transforms.CenterCrop

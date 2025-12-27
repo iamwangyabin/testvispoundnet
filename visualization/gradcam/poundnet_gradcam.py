@@ -256,11 +256,60 @@ class PoundNetGradCAM(ViTGradCAM):
         else:
             grid_size = self.patch_grid_size
         
-        # Compute importance weights (global average pooling of gradients)
-        weights = torch.mean(patch_gradients, dim=0, keepdim=True)  # (1, dim)
+        # Add debugging information
+        print(f"[DEBUG] Patch gradients shape: {patch_gradients.shape}")
+        print(f"[DEBUG] Patch activations shape: {patch_activations.shape}")
+        print(f"[DEBUG] Gradients stats - min: {patch_gradients.min():.6f}, max: {patch_gradients.max():.6f}, mean: {patch_gradients.mean():.6f}")
+        print(f"[DEBUG] Activations stats - min: {patch_activations.min():.6f}, max: {patch_activations.max():.6f}, mean: {patch_activations.mean():.6f}")
+
+        # Method 1: Standard GradCAM (average gradients across spatial dimension)
+        weights_standard = torch.mean(patch_gradients, dim=0, keepdim=True)  # (1, dim)
+        cam_standard = torch.sum(weights_standard * patch_activations, dim=1)  # (num_patches,)
+
+        # Method 2: Use absolute gradients to avoid cancellation
+        weights_abs = torch.mean(torch.abs(patch_gradients), dim=0, keepdim=True)  # (1, dim)
+        cam_abs = torch.sum(weights_abs * patch_activations, dim=1)  # (num_patches,)
+
+        # Method 3: Use squared gradients for stronger attention highlighting
+        weights_squared = torch.mean(patch_gradients.pow(2), dim=0, keepdim=True)  # (1, dim)
+        cam_squared = torch.sum(weights_squared * torch.abs(patch_activations), dim=1)  # (num_patches,)
+
+        # Method 4: Per-patch importance (element-wise multiplication)
+        patch_importance = torch.sum(torch.abs(patch_gradients) * torch.abs(patch_activations), dim=1)  # (num_patches,)
+        cam_importance = patch_importance
+
+        # Method 5: Enhanced attention with gradient magnitude weighting
+        grad_magnitude = torch.norm(patch_gradients, dim=1, keepdim=True)  # (num_patches, 1)
+        act_magnitude = torch.norm(patch_activations, dim=1, keepdim=True)  # (num_patches, 1)
+        cam_enhanced = (grad_magnitude * act_magnitude).squeeze()  # (num_patches,)
+
+        # Debug all methods
+        print(f"[DEBUG] Standard CAM stats - min: {cam_standard.min():.6f}, max: {cam_standard.max():.6f}, mean: {cam_standard.mean():.6f}")
+        print(f"[DEBUG] Absolute CAM stats - min: {cam_abs.min():.6f}, max: {cam_abs.max():.6f}, mean: {cam_abs.mean():.6f}")
+        print(f"[DEBUG] Squared CAM stats - min: {cam_squared.min():.6f}, max: {cam_squared.max():.6f}, mean: {cam_squared.mean():.6f}")
+        print(f"[DEBUG] Importance CAM stats - min: {cam_importance.min():.6f}, max: {cam_importance.max():.6f}, mean: {cam_importance.mean():.6f}")
+        print(f"[DEBUG] Enhanced CAM stats - min: {cam_enhanced.min():.6f}, max: {cam_enhanced.max():.6f}, mean: {cam_enhanced.mean():.6f}")
+
+        # Choose the best method based on maximum activation
+        cam_methods = {
+            'standard': cam_standard,
+            'absolute': cam_abs,
+            'squared': cam_squared,
+            'importance': cam_importance,
+            'enhanced': cam_enhanced
+        }
         
-        # Generate CAM by weighted combination
-        cam = torch.sum(weights * patch_activations, dim=1)  # (num_patches,)
+        # Select method with highest maximum value (strongest attention)
+        best_method = max(cam_methods.keys(), key=lambda k: cam_methods[k].max().item())
+        cam = cam_methods[best_method]
+        print(f"[DEBUG] Selected method: {best_method}")
+        
+        # If still all zeros, use enhanced method with small epsilon
+        if cam.max() <= 1e-6:
+            cam = cam_enhanced + 1e-6
+            print("[DEBUG] All methods near zero, using enhanced with epsilon")
+
+        print(f"[DEBUG] Final CAM before ReLU - min: {cam.min():.6f}, max: {cam.max():.6f}, mean: {cam.mean():.6f}")
         
         # Reshape to spatial grid
         cam = cam[:grid_size * grid_size].view(grid_size, grid_size)
@@ -272,12 +321,12 @@ class PoundNetGradCAM(ViTGradCAM):
         print(f"[DEBUG] CAM tensor requires_grad: {cam.requires_grad}")
         cam = cam.detach().cpu().numpy()
         
-        # Normalize if requested
+        # Enhanced normalization and contrast improvement
         if normalize:
-            cam = self._normalize_cam(cam)
+            cam = self._enhanced_normalize_cam(cam)
         
-        # Upsample to input resolution
-        cam = cv2.resize(cam, (self.input_size, self.input_size))
+        # Upsample to input resolution with better interpolation
+        cam = cv2.resize(cam, (self.input_size, self.input_size), interpolation=cv2.INTER_CUBIC)
         
         if return_logits:
             return cam, logits
@@ -433,6 +482,170 @@ class PoundNetGradCAM(ViTGradCAM):
         
         return results
     
+    def _enhanced_normalize_cam(self, cam: np.ndarray) -> np.ndarray:
+        """Enhanced CAM normalization with better contrast and attention highlighting."""
+        # Remove any NaN or infinite values
+        cam = np.nan_to_num(cam, nan=0.0, posinf=1.0, neginf=0.0)
+        
+        # Apply gamma correction to enhance contrast
+        gamma = 0.7  # Values < 1 enhance bright regions
+        cam_gamma = np.power(cam, gamma)
+        
+        # Standard min-max normalization
+        cam_min, cam_max = cam_gamma.min(), cam_gamma.max()
+        if cam_max > cam_min:
+            cam_normalized = (cam_gamma - cam_min) / (cam_max - cam_min)
+        else:
+            cam_normalized = cam_gamma
+        
+        # Apply histogram equalization for better contrast
+        cam_uint8 = (cam_normalized * 255).astype(np.uint8)
+        cam_equalized = cv2.equalizeHist(cam_uint8)
+        cam_enhanced = cam_equalized.astype(np.float32) / 255.0
+        
+        # Apply sigmoid enhancement to make attention more prominent
+        cam_sigmoid = 1 / (1 + np.exp(-10 * (cam_enhanced - 0.5)))
+        
+        # Final normalization
+        cam_final = (cam_sigmoid - cam_sigmoid.min()) / (cam_sigmoid.max() - cam_sigmoid.min() + 1e-8)
+        
+        print(f"[DEBUG] Enhanced normalization - input range: [{cam.min():.6f}, {cam.max():.6f}], output range: [{cam_final.min():.6f}, {cam_final.max():.6f}]")
+        
+        return cam_final
+    
+    def generate_enhanced_attention_map(
+        self,
+        input_tensor: torch.Tensor,
+        target_class: Optional[Union[int, str]] = None,
+        layer_name: Optional[str] = None,
+        enhancement_method: str = 'multi_scale'
+    ) -> np.ndarray:
+        """
+        Generate enhanced attention map with multiple highlighting techniques.
+        
+        Args:
+            input_tensor: Input tensor of shape (1, 3, H, W)
+            target_class: Target class for attention
+            layer_name: Specific layer to use
+            enhancement_method: Enhancement method ('multi_scale', 'guided', 'integrated')
+            
+        Returns:
+            Enhanced attention map
+        """
+        if enhancement_method == 'multi_scale':
+            return self._generate_multi_scale_attention(input_tensor, target_class, layer_name)
+        elif enhancement_method == 'guided':
+            return self._generate_guided_attention(input_tensor, target_class, layer_name)
+        elif enhancement_method == 'integrated':
+            return self._generate_integrated_attention(input_tensor, target_class, layer_name)
+        else:
+            return self.generate_cam(input_tensor, target_class, layer_name, normalize=True)
+    
+    def _generate_multi_scale_attention(
+        self,
+        input_tensor: torch.Tensor,
+        target_class: Optional[Union[int, str]] = None,
+        layer_name: Optional[str] = None
+    ) -> np.ndarray:
+        """Generate multi-scale attention by combining multiple layers."""
+        attention_maps = []
+        
+        # Generate CAMs for all target layers
+        for layer in self.target_layers:
+            try:
+                cam = self.generate_cam(input_tensor, target_class, layer, normalize=False)
+                attention_maps.append(cam)
+            except Exception as e:
+                print(f"[DEBUG] Failed to generate CAM for layer {layer}: {e}")
+                continue
+        
+        if not attention_maps:
+            # Fallback to single layer
+            return self.generate_cam(input_tensor, target_class, layer_name, normalize=True)
+        
+        # Combine attention maps with weighted average
+        weights = [0.2, 0.3, 0.5]  # Give more weight to later layers
+        if len(attention_maps) != len(weights):
+            weights = [1.0 / len(attention_maps)] * len(attention_maps)
+        
+        combined_attention = np.zeros_like(attention_maps[0])
+        for i, (cam, weight) in enumerate(zip(attention_maps, weights)):
+            # Normalize each CAM individually
+            cam_norm = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
+            combined_attention += weight * cam_norm
+        
+        # Enhanced normalization
+        return self._enhanced_normalize_cam(combined_attention)
+    
+    def _generate_guided_attention(
+        self,
+        input_tensor: torch.Tensor,
+        target_class: Optional[Union[int, str]] = None,
+        layer_name: Optional[str] = None
+    ) -> np.ndarray:
+        """Generate guided attention using gradient guidance."""
+        # Get standard CAM
+        cam = self.generate_cam(input_tensor, target_class, layer_name, normalize=False)
+        
+        # Compute input gradients for guidance
+        input_tensor.requires_grad_(True)
+        output = self.model(input_tensor)
+        
+        if isinstance(output, dict):
+            logits = output['logits']
+        else:
+            logits = output
+        
+        # Handle target class
+        if target_class is None:
+            target_class_idx = logits.argmax(dim=1).item()
+        elif isinstance(target_class, str):
+            target_class_idx = 0 if target_class.lower() == 'real' else 1
+        else:
+            target_class_idx = target_class
+        
+        # Compute input gradients
+        self.model.zero_grad()
+        class_score = logits[0, target_class_idx]
+        input_grads = torch.autograd.grad(class_score, input_tensor, retain_graph=True)[0]
+        
+        # Convert input gradients to attention guidance
+        input_grads_np = input_grads.squeeze().detach().cpu().numpy()
+        guidance = np.mean(np.abs(input_grads_np), axis=0)  # Average across channels
+        
+        # Resize guidance to match CAM size
+        guidance_resized = cv2.resize(guidance, (cam.shape[1], cam.shape[0]))
+        
+        # Combine CAM with guidance
+        guided_cam = cam * (1 + guidance_resized)
+        
+        return self._enhanced_normalize_cam(guided_cam)
+    
+    def _generate_integrated_attention(
+        self,
+        input_tensor: torch.Tensor,
+        target_class: Optional[Union[int, str]] = None,
+        layer_name: Optional[str] = None
+    ) -> np.ndarray:
+        """Generate integrated attention using multiple techniques."""
+        # Get CAMs for both classes
+        real_cam = self.generate_cam(input_tensor, 'real', layer_name, normalize=False)
+        fake_cam = self.generate_cam(input_tensor, 'fake', layer_name, normalize=False)
+        
+        # Compute difference map (discriminative regions)
+        diff_map = np.abs(fake_cam - real_cam)
+        
+        # Get target class CAM
+        if target_class is None or target_class == 'fake' or target_class == 1:
+            target_cam = fake_cam
+        else:
+            target_cam = real_cam
+        
+        # Integrate target attention with discriminative regions
+        integrated_attention = target_cam * (1 + 0.5 * diff_map)
+        
+        return self._enhanced_normalize_cam(integrated_attention)
+
     def get_model_info(self) -> Dict[str, Any]:
         """Get information about the PoundNet model."""
         info = super().get_layer_info()
