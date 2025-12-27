@@ -66,8 +66,6 @@ class PoundNetGradCAM(ViTGradCAM):
     
     def _enable_gradients_for_gradcam(self):
         """Enable gradients for all parameters needed for GradCAM computation."""
-        print("[DEBUG] Enabling gradients for GradCAM computation...")
-        
         # Store original gradient states
         for name, param in self.model.named_parameters():
             self.original_requires_grad[name] = param.requires_grad
@@ -77,18 +75,9 @@ class PoundNetGradCAM(ViTGradCAM):
         for name, param in self.model.named_parameters():
             if 'image_encoder' in name:
                 param.requires_grad_(True)
-                print(f"[DEBUG] Enabled gradients for: {name}")
-        
-        # Verify gradients are actually enabled
-        enabled_count = 0
-        for name, param in self.model.named_parameters():
-            if 'image_encoder' in name and param.requires_grad:
-                enabled_count += 1
-        print(f"[DEBUG] Successfully enabled gradients for {enabled_count} image encoder parameters")
     
     def _restore_gradients(self):
         """Restore original gradient states."""
-        print("[DEBUG] Restoring original gradient states...")
         for name, param in self.model.named_parameters():
             if name in self.original_requires_grad:
                 param.requires_grad_(self.original_requires_grad[name])
@@ -97,14 +86,11 @@ class PoundNetGradCAM(ViTGradCAM):
         """Get optimal target layers for PoundNet architecture."""
         layer_names = []
         
-        print("[DEBUG] Searching for target layers in PoundNet...")
-        
         # Target the visual encoder transformer blocks
         for name, module in self.model.named_modules():
             if 'image_encoder.transformer.resblocks' in name:
                 if name.endswith('.ln_2'):  # Layer norm after MLP
                     layer_names.append(name)
-                    print(f"[DEBUG] Found target layer: {name}")
         
         # If no transformer blocks found, try alternative naming
         if not layer_names:
@@ -112,18 +98,13 @@ class PoundNetGradCAM(ViTGradCAM):
                 if 'visual.transformer.resblocks' in name:
                     if name.endswith('.ln_2'):
                         layer_names.append(name)
-                        print(f"[DEBUG] Found alternative target layer: {name}")
-        
-        print(f"[DEBUG] Total layers found: {len(layer_names)}")
         
         # Return last few layers for best results
         if len(layer_names) >= 3:
             selected = [layer_names[6], layer_names[12], layer_names[-1]]  # Early, middle, late
-            print(f"[DEBUG] Selected layers: {selected}")
             return selected
         else:
             selected = layer_names[-2:] if len(layer_names) >= 2 else layer_names
-            print(f"[DEBUG] Selected layers: {selected}")
             return selected
     
     def generate_cam(
@@ -157,14 +138,6 @@ class PoundNetGradCAM(ViTGradCAM):
         input_tensor = input_tensor.to(self.device)
         input_tensor.requires_grad_(True)
         
-        print(f"[DEBUG] PoundNet input tensor requires_grad: {input_tensor.requires_grad}")
-        
-        # Check if image encoder parameters have gradients enabled
-        image_encoder_grad_count = 0
-        for name, param in self.model.named_parameters():
-            if 'image_encoder' in name and param.requires_grad:
-                image_encoder_grad_count += 1
-        print(f"[DEBUG] Image encoder parameters with gradients: {image_encoder_grad_count}")
         
         # PoundNet forward pass
         output = self.model(input_tensor)
@@ -175,8 +148,6 @@ class PoundNetGradCAM(ViTGradCAM):
         else:
             logits = output
         
-        print(f"[DEBUG] PoundNet logits requires_grad: {logits.requires_grad}")
-        print(f"[DEBUG] PoundNet logits shape: {logits.shape}")
         
         # Handle target class specification
         if target_class is None:
@@ -191,10 +162,7 @@ class PoundNetGradCAM(ViTGradCAM):
         else:
             target_class_idx = target_class
         
-        print(f"[DEBUG] PoundNet target class: {target_class_idx}")
-        
         # Re-enable gradients before backward pass (PoundNet may have disabled them)
-        print("[DEBUG] Re-enabling gradients before backward pass...")
         for name, param in self.model.named_parameters():
             if 'image_encoder' in name:
                 param.requires_grad_(True)
@@ -202,20 +170,11 @@ class PoundNetGradCAM(ViTGradCAM):
         # Backward pass
         self.model.zero_grad()
         class_score = logits[0, target_class_idx]
-        print(f"[DEBUG] PoundNet class score requires_grad: {class_score.requires_grad}")
         
         if not class_score.requires_grad:
             raise RuntimeError("Class score does not require gradients. Check model parameter gradients.")
         
-        # Verify image encoder parameters still have gradients enabled
-        enabled_params = sum(1 for name, param in self.model.named_parameters()
-                           if 'image_encoder' in name and param.requires_grad)
-        print(f"[DEBUG] Image encoder parameters with gradients before backward: {enabled_params}")
-        
         class_score.backward(retain_graph=True)
-        
-        print(f"[DEBUG] PoundNet gradients captured: {list(self.gradients.keys())}")
-        print(f"[DEBUG] PoundNet activations captured: {list(self.activations.keys())}")
         
         # Select layer for CAM generation
         if layer_name is None:
@@ -228,10 +187,6 @@ class PoundNetGradCAM(ViTGradCAM):
         gradients = self.gradients[layer_name]
         activations = self.activations[layer_name]
         
-        print(f"[DEBUG] Raw gradients shape: {gradients.shape}")
-        print(f"[DEBUG] Raw activations shape: {activations.shape}")
-        print(f"[DEBUG] Raw gradients stats - min: {gradients.min():.6f}, max: {gradients.max():.6f}, mean: {gradients.mean():.6f}")
-        print(f"[DEBUG] Raw activations stats - min: {activations.min():.6f}, max: {activations.max():.6f}, mean: {activations.mean():.6f}")
         
         # Handle different tensor formats
         if gradients.dim() == 3:
@@ -240,16 +195,12 @@ class PoundNetGradCAM(ViTGradCAM):
                 gradients = gradients.permute(1, 0, 2)
                 activations = activations.permute(1, 0, 2)
         
-        print(f"[DEBUG] After permute - gradients shape: {gradients.shape}")
-        print(f"[DEBUG] After permute - activations shape: {activations.shape}")
-        print(f"[DEBUG] After permute - gradients stats - min: {gradients.min():.6f}, max: {gradients.max():.6f}, mean: {gradients.mean():.6f}")
         
         # Extract patch tokens, accounting for PoundNet structure:
         # [class_token, patch_tokens..., prompt_tokens...]
         batch_size = gradients.shape[0]
         seq_len = gradients.shape[1]
         
-        print(f"[DEBUG] Sequence length: {seq_len}, Expected patches: {self.num_patches}")
         
         # Calculate token positions
         class_token_idx = 0
@@ -257,54 +208,32 @@ class PoundNetGradCAM(ViTGradCAM):
         patch_end_idx = patch_start_idx + self.num_patches
         prompt_start_idx = patch_end_idx
         
-        print(f"[DEBUG] Token positions - class: {class_token_idx}, patch_start: {patch_start_idx}, patch_end: {patch_end_idx}, prompt_start: {prompt_start_idx}")
         
         # Ensure we don't exceed sequence length
         if patch_end_idx > seq_len:
-            print(f"[DEBUG] Patch end index {patch_end_idx} exceeds sequence length {seq_len}, adjusting...")
             # Fallback: use all tokens except class token and potential prompt tokens
             # Try to identify prompt tokens at the end
             if seq_len > self.num_patches + 1:
                 # Assume prompt tokens are at the end
                 estimated_prompt_tokens = seq_len - self.num_patches - 1
                 patch_end_idx = seq_len - estimated_prompt_tokens
-                print(f"[DEBUG] Estimated {estimated_prompt_tokens} prompt tokens, new patch_end: {patch_end_idx}")
             else:
                 patch_end_idx = seq_len
                 patch_start_idx = 1
-                print(f"[DEBUG] Using all available tokens from {patch_start_idx} to {patch_end_idx}")
-        
-        # Debug token ranges and analyze gradient distribution
-        print(f"[DEBUG] Extracting tokens from {patch_start_idx} to {patch_end_idx} (total: {patch_end_idx - patch_start_idx})")
         
         # Analyze gradient distribution across all tokens
         all_gradients = gradients[0]  # Shape: (273, 1024)
         token_grad_norms = torch.norm(all_gradients, dim=1)  # Shape: (273,)
-        
-        print(f"[DEBUG] Token gradient norms - shape: {token_grad_norms.shape}")
-        print(f"[DEBUG] Token gradient norms - min: {token_grad_norms.min():.6f}, max: {token_grad_norms.max():.6f}, mean: {token_grad_norms.mean():.6f}")
-        
-        # Find tokens with non-zero gradients
-        nonzero_tokens = torch.nonzero(token_grad_norms > 1e-6).squeeze()
-        print(f"[DEBUG] Tokens with non-zero gradients: {nonzero_tokens.tolist() if nonzero_tokens.numel() > 0 else 'None'}")
         
         # Check specific token ranges
         class_token_grad = token_grad_norms[0]
         patch_token_grads = token_grad_norms[1:257] if seq_len > 257 else token_grad_norms[1:]
         remaining_token_grads = token_grad_norms[257:] if seq_len > 257 else torch.tensor([])
         
-        print(f"[DEBUG] Class token gradient norm: {class_token_grad:.6f}")
-        print(f"[DEBUG] Patch tokens gradient norms - min: {patch_token_grads.min():.6f}, max: {patch_token_grads.max():.6f}, mean: {patch_token_grads.mean():.6f}")
-        if remaining_token_grads.numel() > 0:
-            print(f"[DEBUG] Remaining tokens gradient norms - min: {remaining_token_grads.min():.6f}, max: {remaining_token_grads.max():.6f}, mean: {remaining_token_grads.mean():.6f}")
-        
         # Try different extraction strategies
         if patch_token_grads.max() <= 1e-6:
-            print("[DEBUG] Patch tokens have zero gradients, trying alternative extraction...")
-            
             # Strategy 1: Use all tokens except class token
             if remaining_token_grads.numel() > 0 and remaining_token_grads.max() > 1e-6:
-                print("[DEBUG] Using remaining tokens (likely prompt tokens) for gradient computation")
                 # Use the last 256 tokens or all remaining tokens
                 start_idx = max(1, seq_len - 256)
                 end_idx = seq_len
@@ -320,7 +249,6 @@ class PoundNetGradCAM(ViTGradCAM):
                     patch_gradients = patch_gradients[:256]
                     patch_activations = patch_activations[:256]
             else:
-                print("[DEBUG] No tokens have significant gradients, using class token with patch activations")
                 # Better fallback: use class token gradients with actual patch activations
                 # This preserves spatial information from patch activations while using class gradients
                 class_grad = gradients[0, 0:1, :].repeat(256, 1)  # Repeat class gradients
@@ -340,10 +268,6 @@ class PoundNetGradCAM(ViTGradCAM):
             patch_gradients = gradients[0, patch_start_idx:patch_end_idx, :]
             patch_activations = activations[0, patch_start_idx:patch_end_idx, :]
         
-        print(f"[DEBUG] Final extracted patch gradients shape: {patch_gradients.shape}")
-        print(f"[DEBUG] Final extracted patch activations shape: {patch_activations.shape}")
-        print(f"[DEBUG] Final extracted patch gradients stats - min: {patch_gradients.min():.6f}, max: {patch_gradients.max():.6f}, mean: {patch_gradients.mean():.6f}")
-        print(f"[DEBUG] Final extracted patch activations stats - min: {patch_activations.min():.6f}, max: {patch_activations.max():.6f}, mean: {patch_activations.mean():.6f}")
         
         # Adjust for actual number of patch tokens
         actual_patch_tokens = patch_gradients.shape[0]
@@ -364,11 +288,6 @@ class PoundNetGradCAM(ViTGradCAM):
         else:
             grid_size = self.patch_grid_size
         
-        # Add debugging information
-        print(f"[DEBUG] Patch gradients shape: {patch_gradients.shape}")
-        print(f"[DEBUG] Patch activations shape: {patch_activations.shape}")
-        print(f"[DEBUG] Gradients stats - min: {patch_gradients.min():.6f}, max: {patch_gradients.max():.6f}, mean: {patch_gradients.mean():.6f}")
-        print(f"[DEBUG] Activations stats - min: {patch_activations.min():.6f}, max: {patch_activations.max():.6f}, mean: {patch_activations.mean():.6f}")
 
         # Method 1: Standard GradCAM (average gradients across spatial dimension)
         weights_standard = torch.mean(patch_gradients, dim=0, keepdim=True)  # (1, dim)
@@ -391,12 +310,6 @@ class PoundNetGradCAM(ViTGradCAM):
         act_magnitude = torch.norm(patch_activations, dim=1, keepdim=True)  # (num_patches, 1)
         cam_enhanced = (grad_magnitude * act_magnitude).squeeze()  # (num_patches,)
 
-        # Debug all methods
-        print(f"[DEBUG] Standard CAM stats - min: {cam_standard.min():.6f}, max: {cam_standard.max():.6f}, mean: {cam_standard.mean():.6f}")
-        print(f"[DEBUG] Absolute CAM stats - min: {cam_abs.min():.6f}, max: {cam_abs.max():.6f}, mean: {cam_abs.mean():.6f}")
-        print(f"[DEBUG] Squared CAM stats - min: {cam_squared.min():.6f}, max: {cam_squared.max():.6f}, mean: {cam_squared.mean():.6f}")
-        print(f"[DEBUG] Importance CAM stats - min: {cam_importance.min():.6f}, max: {cam_importance.max():.6f}, mean: {cam_importance.mean():.6f}")
-        print(f"[DEBUG] Enhanced CAM stats - min: {cam_enhanced.min():.6f}, max: {cam_enhanced.max():.6f}, mean: {cam_enhanced.mean():.6f}")
 
         # Choose the best method based on maximum activation
         cam_methods = {
@@ -410,14 +323,10 @@ class PoundNetGradCAM(ViTGradCAM):
         # Select method with highest maximum value (strongest attention)
         best_method = max(cam_methods.keys(), key=lambda k: cam_methods[k].max().item())
         cam = cam_methods[best_method]
-        print(f"[DEBUG] Selected method: {best_method}")
         
         # If still all zeros, use enhanced method with small epsilon
         if cam.max() <= 1e-6:
             cam = cam_enhanced + 1e-6
-            print("[DEBUG] All methods near zero, using enhanced with epsilon")
-
-        print(f"[DEBUG] Final CAM before ReLU - min: {cam.min():.6f}, max: {cam.max():.6f}, mean: {cam.mean():.6f}")
         
         # Reshape to spatial grid
         cam = cam[:grid_size * grid_size].view(grid_size, grid_size)
@@ -426,7 +335,6 @@ class PoundNetGradCAM(ViTGradCAM):
         cam = F.relu(cam)
         
         # Convert to numpy with proper detachment
-        print(f"[DEBUG] CAM tensor requires_grad: {cam.requires_grad}")
         cam = cam.detach().cpu().numpy()
         
         # Enhanced normalization and contrast improvement
@@ -617,7 +525,6 @@ class PoundNetGradCAM(ViTGradCAM):
         # Final normalization
         cam_final = (cam_sigmoid - cam_sigmoid.min()) / (cam_sigmoid.max() - cam_sigmoid.min() + 1e-8)
         
-        print(f"[DEBUG] Enhanced normalization - input range: [{cam.min():.6f}, {cam.max():.6f}], output range: [{cam_final.min():.6f}, {cam_final.max():.6f}]")
         
         return cam_final
     
@@ -664,7 +571,6 @@ class PoundNetGradCAM(ViTGradCAM):
                 cam = self.generate_cam(input_tensor, target_class, layer, normalize=False)
                 attention_maps.append(cam)
             except Exception as e:
-                print(f"[DEBUG] Failed to generate CAM for layer {layer}: {e}")
                 continue
         
         if not attention_maps:

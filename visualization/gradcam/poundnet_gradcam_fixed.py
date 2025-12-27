@@ -68,8 +68,6 @@ class PoundNetGradCAM(ViTGradCAM):
     
     def _enable_gradients_for_gradcam(self):
         """Enable gradients for all parameters needed for GradCAM computation."""
-        print("[DEBUG] Enabling gradients for GradCAM computation...")
-        
         # Store original gradient states
         for name, param in self.model.named_parameters():
             self.original_requires_grad[name] = param.requires_grad
@@ -79,18 +77,9 @@ class PoundNetGradCAM(ViTGradCAM):
         for name, param in self.model.named_parameters():
             if 'image_encoder' in name:
                 param.requires_grad_(True)
-                print(f"[DEBUG] Enabled gradients for: {name}")
-        
-        # Verify gradients are actually enabled
-        enabled_count = 0
-        for name, param in self.model.named_parameters():
-            if 'image_encoder' in name and param.requires_grad:
-                enabled_count += 1
-        print(f"[DEBUG] Successfully enabled gradients for {enabled_count} image encoder parameters")
     
     def _restore_gradients(self):
         """Restore original gradient states."""
-        print("[DEBUG] Restoring original gradient states...")
         for name, param in self.model.named_parameters():
             if name in self.original_requires_grad:
                 param.requires_grad_(self.original_requires_grad[name])
@@ -99,14 +88,11 @@ class PoundNetGradCAM(ViTGradCAM):
         """Get optimal target layers for PoundNet architecture."""
         layer_names = []
         
-        print("[DEBUG] Searching for target layers in PoundNet...")
-        
         # Target the visual encoder transformer blocks
         for name, module in self.model.named_modules():
             if 'image_encoder.transformer.resblocks' in name:
                 if name.endswith('.ln_2'):  # Layer norm after MLP
                     layer_names.append(name)
-                    print(f"[DEBUG] Found target layer: {name}")
         
         # If no transformer blocks found, try alternative naming
         if not layer_names:
@@ -114,18 +100,13 @@ class PoundNetGradCAM(ViTGradCAM):
                 if 'visual.transformer.resblocks' in name:
                     if name.endswith('.ln_2'):
                         layer_names.append(name)
-                        print(f"[DEBUG] Found alternative target layer: {name}")
-        
-        print(f"[DEBUG] Total layers found: {len(layer_names)}")
         
         # Return last few layers for best results
         if len(layer_names) >= 3:
             selected = [layer_names[6], layer_names[12], layer_names[-1]]  # Early, middle, late
-            print(f"[DEBUG] Selected layers: {selected}")
             return selected
         else:
             selected = layer_names[-2:] if len(layer_names) >= 2 else layer_names
-            print(f"[DEBUG] Selected layers: {selected}")
             return selected
     
     def generate_cam(
@@ -164,7 +145,6 @@ class PoundNetGradCAM(ViTGradCAM):
         else:
             logits = output
         
-        print(f"[DEBUG] PoundNet logits shape: {logits.shape}")
         
         # Handle target class specification
         if target_class is None:
@@ -179,13 +159,8 @@ class PoundNetGradCAM(ViTGradCAM):
         else:
             target_class_idx = target_class
         
-        print(f"[DEBUG] PoundNet target class: {target_class_idx}")
-        
         # Generate attention-based CAM
         cam = self._generate_attention_cam(input_tensor, target_class_idx)
-        
-        print(f"[DEBUG] Attention CAM shape: {cam.shape}")
-        print(f"[DEBUG] Attention CAM stats - min: {cam.min():.6f}, max: {cam.max():.6f}, mean: {cam.mean():.6f}")
         
         # Enhanced normalization and contrast improvement
         if normalize:
@@ -206,7 +181,6 @@ class PoundNetGradCAM(ViTGradCAM):
         This method extracts attention weights from the last few transformer layers
         and uses them to create a spatial attention map.
         """
-        print("[DEBUG] Generating attention-based CAM...")
         
         # Hook to capture attention weights
         attention_weights = {}
@@ -239,11 +213,9 @@ class PoundNetGradCAM(ViTGradCAM):
                 if layer_num >= 20:  # Last 4 layers
                     hook = module.register_forward_hook(attention_hook(name))
                     hooks.append(hook)
-                    print(f"[DEBUG] Registered attention hook on: {name}")
         
         # If no attention hooks registered, fall back to activation-based method
         if not hooks:
-            print("[DEBUG] No attention hooks registered, using activation-based method...")
             return self._generate_activation_cam(input_tensor, target_class_idx)
         
         # Forward pass to capture attention weights
@@ -255,16 +227,12 @@ class PoundNetGradCAM(ViTGradCAM):
             hook.remove()
         
         if not attention_weights:
-            print("[DEBUG] No attention weights captured, using activation-based method...")
             return self._generate_activation_cam(input_tensor, target_class_idx)
         
         # Process attention weights to create CAM
-        print(f"[DEBUG] Captured attention weights from {len(attention_weights)} layers")
-        
         # Combine attention weights from multiple layers
         combined_attention = None
         for name, attn_weights in attention_weights.items():
-            print(f"[DEBUG] Processing attention from {name}, shape: {attn_weights.shape}")
             
             # attn_weights shape: (batch, num_heads, seq_len, seq_len)
             # We want attention from class token (position 0) to all other tokens
@@ -291,8 +259,6 @@ class PoundNetGradCAM(ViTGradCAM):
         # Convert to numpy
         attention_map = attention_map.detach().cpu().numpy()
         
-        print(f"[DEBUG] Final attention map shape: {attention_map.shape}")
-        print(f"[DEBUG] Attention map stats - min: {attention_map.min():.6f}, max: {attention_map.max():.6f}, mean: {attention_map.mean():.6f}")
         
         return attention_map
     
@@ -300,7 +266,6 @@ class PoundNetGradCAM(ViTGradCAM):
         """
         Fallback method using activation magnitudes when attention weights are not available.
         """
-        print("[DEBUG] Generating activation-based CAM...")
         
         # Clear previous activations
         self.activations.clear()
@@ -310,15 +275,12 @@ class PoundNetGradCAM(ViTGradCAM):
             _ = self.model(input_tensor)
         
         if not self.activations:
-            print("[DEBUG] No activations captured, creating uniform map...")
             # Return a uniform attention map as last resort
             return np.ones((16, 16), dtype=np.float32) * 0.5
         
         # Use the last captured layer
         layer_name = list(self.activations.keys())[-1]
         activations = self.activations[layer_name]
-        
-        print(f"[DEBUG] Using activations from {layer_name}, shape: {activations.shape}")
         
         # Handle different tensor formats
         if activations.dim() == 3:
@@ -354,8 +316,6 @@ class PoundNetGradCAM(ViTGradCAM):
         # Convert to numpy
         activation_map = activation_map.detach().cpu().numpy()
         
-        print(f"[DEBUG] Activation map shape: {activation_map.shape}")
-        print(f"[DEBUG] Activation map stats - min: {activation_map.min():.6f}, max: {activation_map.max():.6f}, mean: {activation_map.mean():.6f}")
         
         return activation_map
     
@@ -535,7 +495,6 @@ class PoundNetGradCAM(ViTGradCAM):
         # Final normalization
         cam_final = (cam_sigmoid - cam_sigmoid.min()) / (cam_sigmoid.max() - cam_sigmoid.min() + 1e-8)
         
-        print(f"[DEBUG] Enhanced normalization - input range: [{cam.min():.6f}, {cam.max():.6f}], output range: [{cam_final.min():.6f}, {cam_final.max():.6f}]")
         
         return cam_final
 

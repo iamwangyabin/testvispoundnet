@@ -88,21 +88,15 @@ class ViTGradCAM:
         """Register forward and backward hooks on target layers."""
         def forward_hook(name):
             def hook(module, input, output):
-                print(f"[DEBUG] Forward hook triggered for {name}, output shape: {output.shape}")
                 # Store activation WITHOUT detaching to preserve gradients
                 self.activations[name] = output
             return hook
         
         def backward_hook(name):
             def hook(module, grad_input, grad_output):
-                print(f"[DEBUG] Backward hook triggered for {name}")
                 if grad_output[0] is not None:
-                    print(f"[DEBUG] Grad output shape: {grad_output[0].shape}")
-                    print(f"[DEBUG] Grad output stats - min: {grad_output[0].min():.6f}, max: {grad_output[0].max():.6f}, mean: {grad_output[0].mean():.6f}")
                     # Store gradients WITHOUT detaching to preserve computation graph
                     self.gradients[name] = grad_output[0]
-                else:
-                    print(f"[DEBUG] Grad output is None for {name}")
             return hook
         
         for layer_name in self.target_layers:
@@ -111,7 +105,6 @@ class ViTGradCAM:
             for attr in layer_name.split('.'):
                 layer = getattr(layer, attr)
             
-            print(f"[DEBUG] Registering hooks for layer: {layer_name}")
             # Register hooks - use full_backward_hook for better gradient capture
             forward_handle = layer.register_forward_hook(forward_hook(layer_name))
             backward_handle = layer.register_full_backward_hook(backward_hook(layer_name))
@@ -153,7 +146,6 @@ class ViTGradCAM:
         input_tensor = input_tensor.to(self.device)
         input_tensor.requires_grad_(True)
         
-        print(f"[DEBUG] Input tensor requires_grad: {input_tensor.requires_grad}")
         
         output = self.model(input_tensor)
         
@@ -165,26 +157,21 @@ class ViTGradCAM:
         else:
             logits = output
         
-        print(f"[DEBUG] Logits requires_grad: {logits.requires_grad}")
         
         # Determine target class
         if target_class is None:
             target_class = logits.argmax(dim=1).item()
         
-        print(f"[DEBUG] Target class: {target_class}")
         
         # Backward pass
         self.model.zero_grad()
         class_score = logits[0, target_class]
-        print(f"[DEBUG] Class score requires_grad: {class_score.requires_grad}")
         
         if not class_score.requires_grad:
             raise RuntimeError("Class score does not require gradients. Check model parameter gradients.")
         
         class_score.backward(retain_graph=True)
         
-        print(f"[DEBUG] Gradients captured: {list(self.gradients.keys())}")
-        print(f"[DEBUG] Activations captured: {list(self.activations.keys())}")
         
         # Select layer for CAM generation
         if layer_name is None:
@@ -197,10 +184,6 @@ class ViTGradCAM:
         gradients = self.gradients[layer_name]  # Shape: (seq_len, batch, dim)
         activations = self.activations[layer_name]  # Shape: (seq_len, batch, dim)
         
-        print(f"[DEBUG] Core gradients shape: {gradients.shape}")
-        print(f"[DEBUG] Core activations shape: {activations.shape}")
-        print(f"[DEBUG] Core gradients stats - min: {gradients.min():.6f}, max: {gradients.max():.6f}, mean: {gradients.mean():.6f}")
-        print(f"[DEBUG] Core activations stats - min: {activations.min():.6f}, max: {activations.max():.6f}, mean: {activations.mean():.6f}")
         
         # Convert to (batch, seq_len, dim) format
         if gradients.dim() == 3 and gradients.shape[1] == 1:
@@ -215,8 +198,6 @@ class ViTGradCAM:
         patch_gradients = gradients[0, patch_start_idx:patch_end_idx, :]  # (num_patches, dim)
         patch_activations = activations[0, patch_start_idx:patch_end_idx, :]  # (num_patches, dim)
         
-        print(f"[DEBUG] Core patch gradients shape: {patch_gradients.shape}")
-        print(f"[DEBUG] Core patch activations shape: {patch_activations.shape}")
         
         # Compute importance weights (global average pooling of gradients)
         weights = torch.mean(patch_gradients, dim=0, keepdim=True)  # (1, dim)
@@ -224,7 +205,6 @@ class ViTGradCAM:
         # Generate CAM by weighted combination
         cam = torch.sum(weights * patch_activations, dim=1)  # (num_patches,)
         
-        print(f"[DEBUG] Core CAM stats - min: {cam.min():.6f}, max: {cam.max():.6f}, mean: {cam.mean():.6f}")
         
         # Reshape to spatial grid
         cam = cam.view(self.patch_grid_size, self.patch_grid_size)  # (14, 14)
@@ -233,7 +213,6 @@ class ViTGradCAM:
         cam = F.relu(cam)
         
         # Convert to numpy with proper detachment
-        print(f"[DEBUG] Core CAM tensor requires_grad: {cam.requires_grad}")
         cam = cam.detach().cpu().numpy()
         
         # Normalize if requested
@@ -411,7 +390,6 @@ class GradCAMPlusPlus(ViTGradCAM):
         cam = F.relu(cam)
         
         # Convert to numpy with proper detachment
-        print(f"[DEBUG] GradCAM++ CAM tensor requires_grad: {cam.requires_grad}")
         cam = cam.detach().cpu().numpy()
         
         # Normalize if requested
