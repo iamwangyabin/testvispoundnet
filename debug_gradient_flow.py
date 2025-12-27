@@ -5,8 +5,8 @@ Debug script to diagnose gradient flow issues in PoundNet GradCAM.
 import torch
 import torch.nn as nn
 import numpy as np
-from networks.poundnet_detector import PoundNetDetector
-from utils.network_factory import get_network
+from networks.poundnet_detector import PoundNet
+from utils.network_factory import get_model
 import yaml
 
 def check_gradient_flow(model, input_tensor):
