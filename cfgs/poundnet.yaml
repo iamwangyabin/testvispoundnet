@@ -23,12 +23,12 @@ datasets:
 
   base_path: "/home/data/yabin/DF-arrow"
   source:
+
     - { target: data.ArrowDatasets,
-        data_root: '${datasets.base_path}/DIF',
-        sub_sets: ['biggan',  'cyclegan',  'dalle_2',  'dalle_mini',  'gaugan',  'glide',  'mj',  'progan',  'sd14',  'sd21',
-                 'stargan',  'stylegan',  'stylegan2'],
+        data_root: '${datasets.base_path}/ForenSynths',
+        sub_sets: [  "progan" ],
         split: 'test',
-        benchmark_name: 'DIF'}
+        benchmark_name: 'ForenSynths' }
 
         
   batch_size: 64
