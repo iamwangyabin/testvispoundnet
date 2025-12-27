@@ -21,7 +21,7 @@ datasets:
     multicalss_names: ["airplane", "bird", "bottle", "car", "chair", "diningtable", "horse", "person", "sheep", "train",
                        "bicycle", "boat", "bus", "cat", "cow", "dog", "motorbike", "pottedplant", "sofa", "tvmonitor"]
 
-  base_path: "/root/autodl-tmp/data"
+  base_path: "/home/data/yabin/DF-arrow"
   source:
 
     - { target: data.ArrowDatasets,
