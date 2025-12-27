@@ -172,11 +172,16 @@ def _analyze_arrow_subset_with_clip_gradcam(
             
             # Convert tensor back to image for visualization
             original_image = img_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy()
+            print(f"DEBUG: Raw tensor image range: [{original_image.min():.3f}, {original_image.max():.3f}]")
+            
             # Denormalize (assuming CLIP normalization)
             mean = np.array([0.48145466, 0.4578275, 0.40821073])
             std = np.array([0.26862954, 0.26130258, 0.27577711])
             original_image = original_image * std + mean
+            print(f"DEBUG: After denormalization range: [{original_image.min():.3f}, {original_image.max():.3f}]")
+            
             original_image = np.clip(original_image * 255, 0, 255).astype(np.uint8)
+            print(f"DEBUG: Final original_image range: [{original_image.min()}, {original_image.max()}], dtype: {original_image.dtype}")
             
             # Create image-specific output directory
             image_output_dir = os.path.join(output_dir, f"image_{idx:06d}")

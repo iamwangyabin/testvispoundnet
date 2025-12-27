@@ -37,13 +37,35 @@ def getAttMap(img, attn_map, blur=True):
     Modified from: https://github.com/salesforce/ALBEF/blob/main/visualization.ipynb
     Create attention map overlay on image.
     """
+    print(f"DEBUG: Input img range: [{img.min():.3f}, {img.max():.3f}], shape: {img.shape}, dtype: {img.dtype}")
+    print(f"DEBUG: Input attn_map range: [{attn_map.min():.3f}, {attn_map.max():.3f}], shape: {attn_map.shape}")
+    
     if blur:
         attn_map = filters.gaussian_filter(attn_map, 0.02*max(img.shape[:2]))
+        print(f"DEBUG: After blur attn_map range: [{attn_map.min():.3f}, {attn_map.max():.3f}]")
+    
     attn_map = normalize(attn_map)
+    print(f"DEBUG: After normalize attn_map range: [{attn_map.min():.3f}, {attn_map.max():.3f}]")
+    
     cmap = plt.get_cmap('jet')
     attn_map_c = np.delete(cmap(attn_map), 3, 2)
+    print(f"DEBUG: attn_map_c range: [{attn_map_c.min():.3f}, {attn_map_c.max():.3f}]")
+    
+    # Ensure img is in [0,1] range for proper blending
+    if img.max() > 1.0:
+        print(f"DEBUG: Converting img from [0,255] to [0,1] range")
+        img = img / 255.0
+        print(f"DEBUG: After conversion img range: [{img.min():.3f}, {img.max():.3f}]")
+    
     attn_map = 1*(1-attn_map**0.7).reshape(attn_map.shape + (1,))*img + \
             (attn_map**0.7).reshape(attn_map.shape+(1,)) * attn_map_c
+    
+    print(f"DEBUG: Final attn_map range: [{attn_map.min():.3f}, {attn_map.max():.3f}]")
+    
+    # Ensure output is in valid range for matplotlib
+    attn_map = np.clip(attn_map, 0, 1)
+    print(f"DEBUG: After clipping attn_map range: [{attn_map.min():.3f}, {attn_map.max():.3f}]")
+    
     return attn_map
 
 
