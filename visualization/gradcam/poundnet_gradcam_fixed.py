@@ -176,89 +176,114 @@ class PoundNetGradCAM(ViTGradCAM):
     
     def _generate_attention_cam(self, input_tensor: torch.Tensor, target_class_idx: int) -> np.ndarray:
         """
-        Generate attention-based CAM by analyzing attention patterns in the vision transformer.
+        Generate CLASS-SPECIFIC attention-based CAM using gradient-weighted attention patterns.
         
-        This method extracts attention weights from the last few transformer layers
-        and uses them to create a spatial attention map.
+        This method computes gradients with respect to the target class and uses them
+        to weight attention patterns, making the visualization class-specific.
         """
         
-        # Hook to capture attention weights
-        attention_weights = {}
+        # Clear previous gradients and activations
+        self.gradients.clear()
+        self.activations.clear()
         
-        def attention_hook(name):
-            def hook(module, input, output):
-                # For MultiheadAttention, we need to capture the attention weights
-                # The output is (attn_output, attn_output_weights) when need_weights=True
-                if hasattr(module, 'need_weights'):
-                    # Temporarily set need_weights to True
-                    original_need_weights = module.need_weights
-                    module.need_weights = True
-                    
-                    # Re-run the attention to get weights
-                    query, key, value = input[0], input[0], input[0]  # Self-attention
-                    attn_output, attn_weights = module(query, key, value, need_weights=True)
-                    attention_weights[name] = attn_weights
-                    
-                    # Restore original setting
-                    module.need_weights = original_need_weights
-                    
-            return hook
+        # Enable gradients for input tensor
+        input_tensor = input_tensor.to(self.device)
+        input_tensor.requires_grad_(True)
         
-        # Register hooks on attention layers
-        hooks = []
-        for name, module in self.model.named_modules():
-            if 'image_encoder.transformer.resblocks' in name and 'attn' in name and isinstance(module, nn.MultiheadAttention):
-                # Only hook the last few layers for efficiency
-                layer_num = int(name.split('.')[3])  # Extract layer number
-                if layer_num >= 20:  # Last 4 layers
-                    hook = module.register_forward_hook(attention_hook(name))
-                    hooks.append(hook)
+        # Forward pass to get logits and capture activations
+        output = self.model(input_tensor)
         
-        # If no attention hooks registered, fall back to activation-based method
-        if not hooks:
+        # Extract logits from PoundNet output
+        if isinstance(output, dict):
+            logits = output['logits']
+        else:
+            logits = output
+        
+        # Compute gradients with respect to target class
+        self.model.zero_grad()
+        class_score = logits[0, target_class_idx]
+        
+        if not class_score.requires_grad:
+            # Fallback to activation-based method if gradients not available
             return self._generate_activation_cam(input_tensor, target_class_idx)
         
-        # Forward pass to capture attention weights
-        with torch.no_grad():
-            _ = self.model(input_tensor)
+        # Backward pass to compute gradients
+        class_score.backward(retain_graph=True)
         
-        # Remove hooks
-        for hook in hooks:
-            hook.remove()
-        
-        if not attention_weights:
+        # Use the last target layer for gradient-weighted attention
+        if not self.activations:
             return self._generate_activation_cam(input_tensor, target_class_idx)
         
-        # Process attention weights to create CAM
-        # Combine attention weights from multiple layers
-        combined_attention = None
-        for name, attn_weights in attention_weights.items():
-            
-            # attn_weights shape: (batch, num_heads, seq_len, seq_len)
-            # We want attention from class token (position 0) to all other tokens
-            class_attention = attn_weights[0, :, 0, :]  # (num_heads, seq_len)
-            
-            # Average across heads
-            class_attention = class_attention.mean(dim=0)  # (seq_len,)
-            
-            # Extract patch token attention (skip class token at position 0)
-            patch_attention = class_attention[1:257]  # Assuming 256 patches
-            
-            if combined_attention is None:
-                combined_attention = patch_attention
-            else:
-                combined_attention += patch_attention
+        layer_name = list(self.activations.keys())[-1]
+        activations = self.activations[layer_name]
         
-        # Average across layers
-        combined_attention = combined_attention / len(attention_weights)
+        # Get corresponding gradients
+        if layer_name in self.gradients:
+            gradients = self.gradients[layer_name]
+        else:
+            # If no gradients available, use activation magnitudes
+            return self._generate_activation_cam(input_tensor, target_class_idx)
         
-        # Reshape to spatial grid (16x16 for 256 patches)
-        grid_size = int(np.sqrt(len(combined_attention)))
-        attention_map = combined_attention.view(grid_size, grid_size)
+        # Handle different tensor formats
+        if activations.dim() == 3:
+            # Format: (seq_len, batch, dim) -> (batch, seq_len, dim)
+            if activations.shape[1] == 1:
+                activations = activations.permute(1, 0, 2)
+                gradients = gradients.permute(1, 0, 2)
+        
+        # Extract patch tokens (skip class token at position 0)
+        batch_size = activations.shape[0]
+        seq_len = activations.shape[1]
+        
+        # Calculate patch token range
+        patch_start_idx = 1
+        patch_end_idx = min(257, seq_len)  # Up to 256 patches
+        
+        patch_activations = activations[0, patch_start_idx:patch_end_idx, :]  # (num_patches, dim)
+        patch_gradients = gradients[0, patch_start_idx:patch_end_idx, :]  # (num_patches, dim)
+        
+        # Compute class-specific importance weights using gradients
+        # Method 1: Global average pooling of gradients (standard GradCAM)
+        weights = torch.mean(patch_gradients, dim=0, keepdim=True)  # (1, dim)
+        cam_standard = torch.sum(weights * patch_activations, dim=1)  # (num_patches,)
+        
+        # Method 2: Use gradient magnitude for stronger class differentiation
+        grad_magnitude = torch.norm(patch_gradients, dim=1)  # (num_patches,)
+        act_magnitude = torch.norm(patch_activations, dim=1)  # (num_patches,)
+        cam_magnitude = grad_magnitude * act_magnitude  # (num_patches,)
+        
+        # Method 3: Element-wise gradient-activation product
+        cam_elementwise = torch.sum(torch.abs(patch_gradients) * torch.abs(patch_activations), dim=1)  # (num_patches,)
+        
+        # Choose the method with strongest class-specific signal
+        cam_methods = {
+            'standard': cam_standard,
+            'magnitude': cam_magnitude,
+            'elementwise': cam_elementwise
+        }
+        
+        # Select method with highest dynamic range (better class differentiation)
+        best_method = max(cam_methods.keys(),
+                         key=lambda k: (cam_methods[k].max() - cam_methods[k].min()).item())
+        cam = cam_methods[best_method]
+        
+        # Ensure we have exactly 256 patches
+        if len(cam) < 256:
+            # Pad with zeros
+            padding = 256 - len(cam)
+            cam = F.pad(cam, (0, padding))
+        elif len(cam) > 256:
+            # Truncate
+            cam = cam[:256]
+        
+        # Reshape to spatial grid (16x16)
+        attention_map = cam.view(16, 16)
+        
+        # Apply ReLU to focus on positive contributions
+        attention_map = F.relu(attention_map)
         
         # Convert to numpy
         attention_map = attention_map.detach().cpu().numpy()
-        
         
         return attention_map
     
