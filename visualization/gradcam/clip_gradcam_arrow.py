@@ -315,6 +315,7 @@ class CLIPGradCAMArrow:
         # Add class-specific metadata
         results['metadata']['class_names'] = class_names
         results['metadata']['template'] = template
+        results['metadata']['best_match_class'] = class_names[results['metadata']['best_match_idx']]
         
         return results
     
