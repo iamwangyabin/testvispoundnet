@@ -38,7 +38,9 @@ def analyze_arrow_dataset_with_clip_gradcam(
     template: str = "a photo of a {}",
     blur: bool = True,
     save_individual: bool = True,
-    save_comparative: bool = True
+    save_comparative: bool = True,
+    shuffle: bool = False,
+    seed: int = None
 ):
     """
     Analyze Arrow dataset with CLIP GradCAM using user's approach.
@@ -55,6 +57,8 @@ def analyze_arrow_dataset_with_clip_gradcam(
         blur: Whether to apply Gaussian blur to attention maps
         save_individual: Whether to save individual visualizations
         save_comparative: Whether to save comparative analysis
+        shuffle: Whether to shuffle the dataset
+        seed: Random seed for reproducible shuffling
     """
     print(f"Analyzing Arrow datasets with CLIP GradCAM...")
     print(f"Model: {model_name}, Layer: {saliency_layer}")
@@ -93,12 +97,17 @@ def analyze_arrow_dataset_with_clip_gradcam(
                     split=sub_data['split']
                 )
                 
-                # Create data loader
+                # Create data loader with optional shuffling
+                generator = None
+                if shuffle and seed is not None:
+                    generator = torch.Generator().manual_seed(seed)
+                
                 data_loader = torch.utils.data.DataLoader(
                     dataset,
                     batch_size=1,  # Process one image at a time for GradCAM
                     num_workers=0,  # Avoid multiprocessing issues with GradCAM
-                    shuffle=False
+                    shuffle=shuffle,
+                    generator=generator
                 )
                 
                 # Create subset output directory
@@ -411,6 +420,10 @@ def main():
                        help='Custom text prompts (overrides class names)')
     parser.add_argument('--template', type=str, default="a photo of a {}",
                        help='Template for class name prompts')
+    parser.add_argument('--shuffle', action='store_true',
+                       help='Shuffle the dataset for random sampling')
+    parser.add_argument('--seed', type=int, default=42,
+                       help='Random seed for reproducible shuffling (default: 42)')
     parser.add_argument('--blur', action='store_true', default=True,
                        help='Apply Gaussian blur to attention maps')
     parser.add_argument('--no_blur', action='store_true',
@@ -464,7 +477,9 @@ def main():
             template=args.template,
             blur=args.blur,
             save_individual=args.individual,
-            save_comparative=args.comparative
+            save_comparative=args.comparative,
+            shuffle=args.shuffle,
+            seed=args.seed
         )
     
     print("\nCLIP GradCAM analysis complete!")

@@ -39,7 +39,9 @@ def analyze_arrow_dataset(
     max_images_per_subset: int = None,
     save_individual: bool = True,
     save_comparative: bool = True,
-    save_multilayer: bool = False
+    save_multilayer: bool = False,
+    shuffle: bool = False,
+    seed: int = None
 ):
     """
     Analyze Arrow dataset with full GradCAM visualizations.
@@ -53,6 +55,8 @@ def analyze_arrow_dataset(
         save_individual: Whether to save individual class visualizations
         save_comparative: Whether to save comparative analysis
         save_multilayer: Whether to save multi-layer analysis
+        shuffle: Whether to shuffle the dataset
+        seed: Random seed for reproducible shuffling
     """
     print(f"Analyzing Arrow datasets with full visualizations...")
     print(f"Found {len(dataset_config['source'])} dataset sources")
@@ -79,12 +83,17 @@ def analyze_arrow_dataset(
                     split=sub_data['split']
                 )
                 
-                # Create data loader
+                # Create data loader with optional shuffling
+                generator = None
+                if shuffle and seed is not None:
+                    generator = torch.Generator().manual_seed(seed)
+                
                 data_loader = torch.utils.data.DataLoader(
                     dataset,
                     batch_size=1,  # Process one image at a time for GradCAM
                     num_workers=0,  # Avoid multiprocessing issues with GradCAM
-                    shuffle=False
+                    shuffle=shuffle,
+                    generator=generator
                 )
                 
                 # Create subset output directory
@@ -423,6 +432,9 @@ def batch_analyze_images(
         image_files.extend(Path(input_dir).glob(f"*{ext}"))
         image_files.extend(Path(input_dir).glob(f"*{ext.upper()}"))
     
+    # Sort for consistent ordering before potential shuffling
+    image_files = sorted(image_files)
+    
     if max_images:
         image_files = image_files[:max_images]
     
@@ -491,6 +503,10 @@ def main():
                        help='Maximum number of images to process in batch mode')
     parser.add_argument('--max_images_per_subset', type=int, default=None,
                        help='Maximum images per dataset subset (for Arrow dataset)')
+    parser.add_argument('--shuffle', action='store_true',
+                       help='Shuffle the dataset for random sampling')
+    parser.add_argument('--seed', type=int, default=42,
+                       help='Random seed for reproducible shuffling (default: 42)')
     parser.add_argument('--individual', action='store_true',
                        help='Save individual class visualizations')
     parser.add_argument('--comparative', action='store_true',
@@ -575,7 +591,9 @@ def main():
             max_images_per_subset=args.max_images_per_subset,
             save_individual=args.individual,
             save_comparative=args.comparative,
-            save_multilayer=args.multilayer
+            save_multilayer=args.multilayer,
+            shuffle=args.shuffle,
+            seed=args.seed
         )
     
     print("\nGradCAM analysis complete!")
