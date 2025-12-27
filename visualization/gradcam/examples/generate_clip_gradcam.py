@@ -460,12 +460,21 @@ def analyze_arrow_dataset_with_clip(
                             json.dump(metadata_copy, f, indent=2)
                         
                         # Add to results
+                        # Debug: Check data types before JSON serialization
+                        true_label_val = label.item()
+                        best_match_idx = metadata['best_match_idx']
+                        best_similarity_val = metadata['similarities'][best_match_idx]
+                        
+                        print(f"      Debug - true_label type: {type(true_label_val)}, value: {true_label_val}")
+                        print(f"      Debug - best_match_idx type: {type(best_match_idx)}, value: {best_match_idx}")
+                        print(f"      Debug - best_similarity type: {type(best_similarity_val)}, value: {best_similarity_val}")
+                        
                         result_summary = {
-                            'image_index': idx,
-                            'true_label': label.item(),
+                            'image_index': int(idx),  # Ensure native Python int
+                            'true_label': int(true_label_val),  # Convert to native Python int
                             'subset_name': f"{sub_data['benchmark_name']}_{sub_set}",
                             'best_match': metadata['best_match_prompt'],
-                            'best_similarity': float(metadata['similarities'][metadata['best_match_idx']]),
+                            'best_similarity': float(best_similarity_val),  # Convert to native Python float
                             'output_dir': image_output_dir
                         }
                         

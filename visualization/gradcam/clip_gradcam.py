@@ -246,11 +246,12 @@ class CLIPGradCAM:
                 continue
         
         # Add comparison metadata
+        best_match_idx = int(np.argmax(all_similarities))  # Convert to native Python int
         results['metadata'] = {
             'text_prompts': text_prompts,
             'similarities': all_similarities,
-            'best_match_idx': np.argmax(all_similarities),
-            'best_match_prompt': text_prompts[np.argmax(all_similarities)],
+            'best_match_idx': best_match_idx,
+            'best_match_prompt': text_prompts[best_match_idx],
             'layer_name': layer_name or self.target_layers[-1]
         }
         
