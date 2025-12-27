@@ -71,12 +71,28 @@ def getAttMap(img, attn_map, blur=True):
 
 def viz_attn(img, attn_map, blur=True, title="CLIP GradCAM", save_path=None):
     """Visualize attention map."""
+    print(f"DEBUG viz_attn: Input img range: [{img.min():.3f}, {img.max():.3f}], dtype: {img.dtype}")
+    
+    # Ensure img is in proper format for matplotlib
+    if img.dtype == np.uint8:
+        display_img = img.astype(np.float32) / 255.0
+    else:
+        display_img = img.copy()
+        if display_img.max() > 1.0:
+            display_img = display_img / 255.0
+    
+    display_img = np.clip(display_img, 0, 1)
+    print(f"DEBUG viz_attn: Processed display_img range: [{display_img.min():.3f}, {display_img.max():.3f}]")
+    
     _, axes = plt.subplots(1, 2, figsize=(10, 5))
-    axes[0].imshow(img)
+    axes[0].imshow(display_img)
     axes[0].set_title("Original Image")
     axes[0].axis("off")
     
-    axes[1].imshow(getAttMap(img, attn_map, blur))
+    att_map_result = getAttMap(display_img, attn_map, blur)
+    print(f"DEBUG viz_attn: Final att_map_result range: [{att_map_result.min():.3f}, {att_map_result.max():.3f}]")
+    
+    axes[1].imshow(att_map_result)
     axes[1].set_title(title)
     axes[1].axis("off")
     
@@ -412,6 +428,19 @@ def visualize_clip_gradcam_results(
     Returns:
         Matplotlib figure
     """
+    print(f"DEBUG visualize_clip_gradcam_results: Input original_image range: [{original_image.min():.3f}, {original_image.max():.3f}], dtype: {original_image.dtype}")
+    
+    # Ensure original_image is in proper format for matplotlib
+    if original_image.dtype == np.uint8:
+        display_img = original_image.astype(np.float32) / 255.0
+    else:
+        display_img = original_image.copy()
+        if display_img.max() > 1.0:
+            display_img = display_img / 255.0
+    
+    display_img = np.clip(display_img, 0, 1)
+    print(f"DEBUG visualize_clip_gradcam_results: Processed display_img range: [{display_img.min():.3f}, {display_img.max():.3f}]")
+    
     metadata = results['metadata']
     similarities = metadata['similarities']
     text_prompts = metadata['text_prompts']
@@ -439,11 +468,11 @@ def visualize_clip_gradcam_results(
             cam = results[prompt]['cam']
             
             # Create attention map overlay
-            att_map = getAttMap(original_image, cam, blur)
+            att_map = getAttMap(display_img, cam, blur)
             ax.imshow(att_map)
             ax.set_title(f"{prompt}\nSimilarity: {similarity:.3f}", fontsize=10)
         else:
-            ax.imshow(original_image)
+            ax.imshow(display_img)
             ax.set_title(f"{prompt}\nSimilarity: {similarity:.3f}\n(CAM failed)", fontsize=10)
         
         ax.axis('off')
