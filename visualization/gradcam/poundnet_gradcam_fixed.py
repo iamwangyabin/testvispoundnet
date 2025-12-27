@@ -264,8 +264,8 @@ class PoundNetGradCAM(ViTGradCAM):
             
             # Check if gradients are actually non-zero
             if gradients.abs().max().item() < 1e-10:
-                print("[GradCAM] Gradients are effectively zero, falling back to activation-based method")
-                return self._generate_activation_cam(input_tensor, target_class_idx)
+                print("[GradCAM] Gradients are effectively zero, falling back to synthetic method")
+                return self._generate_synthetic_class_cam(input_tensor, target_class_idx)
             
             # Handle different tensor formats
             if activations.dim() == 3:
@@ -287,6 +287,11 @@ class PoundNetGradCAM(ViTGradCAM):
             
             print(f"[GradCAM] Patch gradients shape: {patch_gradients.shape}, max: {patch_gradients.abs().max().item():.6f}")
             print(f"[GradCAM] Patch activations shape: {patch_activations.shape}, max: {patch_activations.abs().max().item():.6f}")
+            
+            # Check if patch gradients are effectively zero (common in CLIP ViT)
+            if patch_gradients.abs().max().item() < 1e-10:
+                print("[GradCAM] Patch gradients are zero (expected in CLIP ViT), falling back to synthetic method")
+                return self._generate_synthetic_class_cam(input_tensor, target_class_idx)
             
             # Compute class-specific importance weights using gradients
             # Method 1: Global average pooling of gradients (standard GradCAM)
