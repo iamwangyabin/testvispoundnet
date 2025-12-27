@@ -228,6 +228,11 @@ class PoundNetGradCAM(ViTGradCAM):
         gradients = self.gradients[layer_name]
         activations = self.activations[layer_name]
         
+        print(f"[DEBUG] Raw gradients shape: {gradients.shape}")
+        print(f"[DEBUG] Raw activations shape: {activations.shape}")
+        print(f"[DEBUG] Raw gradients stats - min: {gradients.min():.6f}, max: {gradients.max():.6f}, mean: {gradients.mean():.6f}")
+        print(f"[DEBUG] Raw activations stats - min: {activations.min():.6f}, max: {activations.max():.6f}, mean: {activations.mean():.6f}")
+        
         # Handle different tensor formats
         if gradients.dim() == 3:
             # Format: (seq_len, batch, dim) -> (batch, seq_len, dim)
@@ -235,10 +240,16 @@ class PoundNetGradCAM(ViTGradCAM):
                 gradients = gradients.permute(1, 0, 2)
                 activations = activations.permute(1, 0, 2)
         
+        print(f"[DEBUG] After permute - gradients shape: {gradients.shape}")
+        print(f"[DEBUG] After permute - activations shape: {activations.shape}")
+        print(f"[DEBUG] After permute - gradients stats - min: {gradients.min():.6f}, max: {gradients.max():.6f}, mean: {gradients.mean():.6f}")
+        
         # Extract patch tokens, accounting for PoundNet structure:
         # [class_token, patch_tokens..., prompt_tokens...]
         batch_size = gradients.shape[0]
         seq_len = gradients.shape[1]
+        
+        print(f"[DEBUG] Sequence length: {seq_len}, Expected patches: {self.num_patches}")
         
         # Calculate token positions
         class_token_idx = 0
@@ -246,15 +257,34 @@ class PoundNetGradCAM(ViTGradCAM):
         patch_end_idx = patch_start_idx + self.num_patches
         prompt_start_idx = patch_end_idx
         
+        print(f"[DEBUG] Token positions - class: {class_token_idx}, patch_start: {patch_start_idx}, patch_end: {patch_end_idx}, prompt_start: {prompt_start_idx}")
+        
         # Ensure we don't exceed sequence length
         if patch_end_idx > seq_len:
-            # Fallback: use all tokens except class token
-            patch_end_idx = seq_len
-            patch_start_idx = 1
+            print(f"[DEBUG] Patch end index {patch_end_idx} exceeds sequence length {seq_len}, adjusting...")
+            # Fallback: use all tokens except class token and potential prompt tokens
+            # Try to identify prompt tokens at the end
+            if seq_len > self.num_patches + 1:
+                # Assume prompt tokens are at the end
+                estimated_prompt_tokens = seq_len - self.num_patches - 1
+                patch_end_idx = seq_len - estimated_prompt_tokens
+                print(f"[DEBUG] Estimated {estimated_prompt_tokens} prompt tokens, new patch_end: {patch_end_idx}")
+            else:
+                patch_end_idx = seq_len
+                patch_start_idx = 1
+                print(f"[DEBUG] Using all available tokens from {patch_start_idx} to {patch_end_idx}")
+        
+        # Debug token ranges
+        print(f"[DEBUG] Extracting tokens from {patch_start_idx} to {patch_end_idx} (total: {patch_end_idx - patch_start_idx})")
         
         # Extract patch tokens
         patch_gradients = gradients[0, patch_start_idx:patch_end_idx, :]
         patch_activations = activations[0, patch_start_idx:patch_end_idx, :]
+        
+        print(f"[DEBUG] Extracted patch gradients shape: {patch_gradients.shape}")
+        print(f"[DEBUG] Extracted patch activations shape: {patch_activations.shape}")
+        print(f"[DEBUG] Extracted patch gradients stats - min: {patch_gradients.min():.6f}, max: {patch_gradients.max():.6f}, mean: {patch_gradients.mean():.6f}")
+        print(f"[DEBUG] Extracted patch activations stats - min: {patch_activations.min():.6f}, max: {patch_activations.max():.6f}, mean: {patch_activations.mean():.6f}")
         
         # Adjust for actual number of patch tokens
         actual_patch_tokens = patch_gradients.shape[0]
