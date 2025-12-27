@@ -363,25 +363,4 @@ class CLIPGradCAM:
     def __del__(self):
         """Cleanup when object is destroyed."""
         if hasattr(self, 'vit_gradcam'):
-            del self.vit_gradcam        }
-    
-    def preprocess_image(self, image_path: str) -> torch.Tensor:
-        """
-        Preprocess image for CLIP model.
-        
-        Args:
-            image_path: Path to image file
-            
-        Returns:
-            Preprocessed image tensor
-        """
-        from PIL import Image
-        
-        image = Image.open(image_path).convert('RGB')
-        image_tensor = self.preprocess(image).unsqueeze(0)
-        return image_tensor
-    
-    def __del__(self):
-        """Cleanup when object is destroyed."""
-        if hasattr(self, 'vit_gradcam'):
             del self.vit_gradcam
