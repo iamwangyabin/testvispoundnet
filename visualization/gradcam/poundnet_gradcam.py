@@ -44,6 +44,13 @@ class PoundNetGradCAM(ViTGradCAM):
             input_size: Input image size (224)
             use_cuda: Whether to use CUDA if available
         """
+        # Store original model state for restoration
+        self.original_requires_grad = {}
+        self.model = model  # Store model reference before enabling gradients
+        
+        # Enable gradients for GradCAM computation
+        self._enable_gradients_for_gradcam()
+        
         # Initialize parent class
         super().__init__(model, target_layers, patch_size, input_size, use_cuda)
         
@@ -57,15 +64,39 @@ class PoundNetGradCAM(ViTGradCAM):
             self._remove_hooks()  # Remove old hooks
             self._register_hooks()  # Register new hooks
     
+    def _enable_gradients_for_gradcam(self):
+        """Enable gradients for all parameters needed for GradCAM computation."""
+        print("[DEBUG] Enabling gradients for GradCAM computation...")
+        
+        # Store original gradient states
+        for name, param in self.model.named_parameters():
+            self.original_requires_grad[name] = param.requires_grad
+        
+        # Enable gradients for image encoder (visual transformer)
+        for name, param in self.model.named_parameters():
+            if 'image_encoder' in name:
+                param.requires_grad_(True)
+                print(f"[DEBUG] Enabled gradients for: {name}")
+    
+    def _restore_gradients(self):
+        """Restore original gradient states."""
+        print("[DEBUG] Restoring original gradient states...")
+        for name, param in self.model.named_parameters():
+            if name in self.original_requires_grad:
+                param.requires_grad_(self.original_requires_grad[name])
+    
     def _get_poundnet_target_layers(self) -> List[str]:
         """Get optimal target layers for PoundNet architecture."""
         layer_names = []
+        
+        print("[DEBUG] Searching for target layers in PoundNet...")
         
         # Target the visual encoder transformer blocks
         for name, module in self.model.named_modules():
             if 'image_encoder.transformer.resblocks' in name:
                 if name.endswith('.ln_2'):  # Layer norm after MLP
                     layer_names.append(name)
+                    print(f"[DEBUG] Found target layer: {name}")
         
         # If no transformer blocks found, try alternative naming
         if not layer_names:
@@ -73,12 +104,19 @@ class PoundNetGradCAM(ViTGradCAM):
                 if 'visual.transformer.resblocks' in name:
                     if name.endswith('.ln_2'):
                         layer_names.append(name)
+                        print(f"[DEBUG] Found alternative target layer: {name}")
+        
+        print(f"[DEBUG] Total layers found: {len(layer_names)}")
         
         # Return last few layers for best results
         if len(layer_names) >= 3:
-            return [layer_names[6], layer_names[12], layer_names[-1]]  # Early, middle, late
+            selected = [layer_names[6], layer_names[12], layer_names[-1]]  # Early, middle, late
+            print(f"[DEBUG] Selected layers: {selected}")
+            return selected
         else:
-            return layer_names[-2:] if len(layer_names) >= 2 else layer_names
+            selected = layer_names[-2:] if len(layer_names) >= 2 else layer_names
+            print(f"[DEBUG] Selected layers: {selected}")
+            return selected
     
     def generate_cam(
         self,
@@ -111,6 +149,15 @@ class PoundNetGradCAM(ViTGradCAM):
         input_tensor = input_tensor.to(self.device)
         input_tensor.requires_grad_(True)
         
+        print(f"[DEBUG] PoundNet input tensor requires_grad: {input_tensor.requires_grad}")
+        
+        # Check if image encoder parameters have gradients enabled
+        image_encoder_grad_count = 0
+        for name, param in self.model.named_parameters():
+            if 'image_encoder' in name and param.requires_grad:
+                image_encoder_grad_count += 1
+        print(f"[DEBUG] Image encoder parameters with gradients: {image_encoder_grad_count}")
+        
         # PoundNet forward pass
         output = self.model(input_tensor)
         
@@ -119,6 +166,9 @@ class PoundNetGradCAM(ViTGradCAM):
             logits = output['logits']
         else:
             logits = output
+        
+        print(f"[DEBUG] PoundNet logits requires_grad: {logits.requires_grad}")
+        print(f"[DEBUG] PoundNet logits shape: {logits.shape}")
         
         # Handle target class specification
         if target_class is None:
@@ -133,10 +183,20 @@ class PoundNetGradCAM(ViTGradCAM):
         else:
             target_class_idx = target_class
         
+        print(f"[DEBUG] PoundNet target class: {target_class_idx}")
+        
         # Backward pass
         self.model.zero_grad()
         class_score = logits[0, target_class_idx]
+        print(f"[DEBUG] PoundNet class score requires_grad: {class_score.requires_grad}")
+        
+        if not class_score.requires_grad:
+            raise RuntimeError("Class score does not require gradients. Check model parameter gradients.")
+        
         class_score.backward(retain_graph=True)
+        
+        print(f"[DEBUG] PoundNet gradients captured: {list(self.gradients.keys())}")
+        print(f"[DEBUG] PoundNet activations captured: {list(self.activations.keys())}")
         
         # Select layer for CAM generation
         if layer_name is None:
@@ -383,3 +443,11 @@ class PoundNetGradCAM(ViTGradCAM):
             'architecture': 'CLIP ViT-L/14 with learnable prompts'
         })
         return info
+    
+    def __del__(self):
+        """Cleanup: restore original gradient states and remove hooks."""
+        try:
+            self._restore_gradients()
+            self._remove_hooks()
+        except:
+            pass  # Ignore errors during cleanup

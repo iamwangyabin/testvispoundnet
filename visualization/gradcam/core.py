@@ -143,6 +143,8 @@ class ViTGradCAM:
         input_tensor = input_tensor.to(self.device)
         input_tensor.requires_grad_(True)
         
+        print(f"[DEBUG] Input tensor requires_grad: {input_tensor.requires_grad}")
+        
         output = self.model(input_tensor)
         
         # Handle different output formats
@@ -153,14 +155,26 @@ class ViTGradCAM:
         else:
             logits = output
         
+        print(f"[DEBUG] Logits requires_grad: {logits.requires_grad}")
+        
         # Determine target class
         if target_class is None:
             target_class = logits.argmax(dim=1).item()
         
+        print(f"[DEBUG] Target class: {target_class}")
+        
         # Backward pass
         self.model.zero_grad()
         class_score = logits[0, target_class]
+        print(f"[DEBUG] Class score requires_grad: {class_score.requires_grad}")
+        
+        if not class_score.requires_grad:
+            raise RuntimeError("Class score does not require gradients. Check model parameter gradients.")
+        
         class_score.backward(retain_graph=True)
+        
+        print(f"[DEBUG] Gradients captured: {list(self.gradients.keys())}")
+        print(f"[DEBUG] Activations captured: {list(self.activations.keys())}")
         
         # Select layer for CAM generation
         if layer_name is None:
